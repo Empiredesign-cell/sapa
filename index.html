@@ -2,7 +2,7 @@
 <html lang="id" class="light">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Sapa Chat</title>
   <link rel="icon" type="image/png" href="sapa-icon-192.png">
   <link rel="apple-touch-icon" href="sapa-icon-192.png">
@@ -8264,6 +8264,830 @@
       `;
       document.head.appendChild(style);
     })();
+
+
+    // =========================================================
+    // SAPA V4.0 — ARCHITECTURE & PRODUCT HARDENING LAYER
+    // Media tetap Firestore-inline sesuai mode aplikasi saat ini.
+    // =========================================================
+    const SAPA_V4_VERSION = '4.0.0';
+    const SAPA_V4 = {
+      maxTextChars: 4000,
+      prefsPrefix: 'sapa_v4_prefs_',
+      blockedPrefix: 'sapa_v4_blocked_',
+      starsPrefix: 'sapa_v4_stars_',
+      draftPrefix: 'sapa_v4_draft_',
+      logsKey: 'sapa_v4_error_logs',
+      maxErrorLogs: 30
+    };
+
+    const V4_DEFAULT_PREFS = {
+      privacy: {
+        lastSeen: 'everyone',
+        readReceipts: true,
+        typingIndicator: true,
+        allowMessages: 'everyone',
+        allowCalls: 'everyone'
+      },
+      performance: {
+        dataSaver: false,
+        reduceMotion: false
+      }
+    };
+
+    state.v4Prefs = JSON.parse(JSON.stringify(V4_DEFAULT_PREFS));
+    state.v4Blocked = new Set();
+    state.v4InitializedForUid = '';
+    state.v4NetworkOnline = navigator.onLine;
+    state.v4SearchQuery = '';
+
+    function deepMergeV4(base, extra) {
+      const output = { ...(base || {}) };
+      Object.entries(extra || {}).forEach(([key, value]) => {
+        if (value && typeof value === 'object' && !Array.isArray(value)) output[key] = deepMergeV4(output[key] || {}, value);
+        else output[key] = value;
+      });
+      return output;
+    }
+
+    function v4StorageKey(prefix, suffix = '') {
+      const uid = state.user?.uid || 'guest';
+      return `${prefix}${uid}${suffix ? '_' + suffix : ''}`;
+    }
+
+    function safeJSONParseV4(value, fallback) {
+      try { return JSON.parse(value); } catch (_) { return fallback; }
+    }
+
+    function loadV4Prefs() {
+      const local = safeJSONParseV4(localStorage.getItem(v4StorageKey(SAPA_V4.prefsPrefix)) || '{}', {});
+      const cloud = state.profile?.preferencesV4 || {};
+      state.v4Prefs = deepMergeV4(V4_DEFAULT_PREFS, deepMergeV4(cloud, local));
+      applyV4Prefs();
+      return state.v4Prefs;
+    }
+
+    async function saveV4Prefs(partial) {
+      state.v4Prefs = deepMergeV4(state.v4Prefs || V4_DEFAULT_PREFS, partial || {});
+      localStorage.setItem(v4StorageKey(SAPA_V4.prefsPrefix), JSON.stringify(state.v4Prefs));
+      state.profile = { ...(state.profile || {}), preferencesV4: state.v4Prefs };
+      applyV4Prefs();
+      if (state.user) {
+        try {
+          await setDoc(doc(db, 'users', state.user.uid), { preferencesV4: state.v4Prefs, updatedAt: serverTimestamp() }, { merge: true });
+        } catch (error) {
+          console.warn('Preferensi V4 tersimpan lokal, sinkronisasi cloud ditolak:', error);
+        }
+      }
+    }
+
+    function applyV4Prefs() {
+      document.documentElement.classList.toggle('sapa-reduce-motion-v4', !!state.v4Prefs?.performance?.reduceMotion);
+      updateV4SettingsSummary();
+    }
+
+    function loadV4Blocked() {
+      const stored = safeJSONParseV4(localStorage.getItem(v4StorageKey(SAPA_V4.blockedPrefix)) || '[]', []);
+      state.v4Blocked = new Set(Array.isArray(stored) ? stored : []);
+    }
+
+    function persistV4Blocked() {
+      localStorage.setItem(v4StorageKey(SAPA_V4.blockedPrefix), JSON.stringify(Array.from(state.v4Blocked || [])));
+    }
+
+    function isBlockedV4(uid) {
+      return !!uid && state.v4Blocked?.has(uid);
+    }
+
+    async function syncBlockToCloudV4(uid, blocked) {
+      if (!state.user || !uid) return;
+      try {
+        await setDoc(doc(db, 'users', state.user.uid, 'blocked', uid), {
+          uid,
+          blocked: !!blocked,
+          updatedAt: serverTimestamp(),
+          createdAtMs: Date.now()
+        }, { merge: true });
+      } catch (error) {
+        console.warn('Block tersimpan lokal; rules belum mengizinkan sync cloud:', error);
+      }
+    }
+
+    function getDraftKeyV4(chatId = state.activeRoomId) {
+      if (!chatId) return '';
+      return v4StorageKey(SAPA_V4.draftPrefix, chatId);
+    }
+
+    function saveCurrentDraftV4() {
+      const input = $('message-input');
+      const key = getDraftKeyV4();
+      if (!input || !key) return;
+      const value = String(input.value || '').slice(0, SAPA_V4.maxTextChars);
+      if (value) localStorage.setItem(key, value);
+      else localStorage.removeItem(key);
+      updateMessageCounterV4();
+    }
+
+    function restoreCurrentDraftV4() {
+      const input = $('message-input');
+      const key = getDraftKeyV4();
+      if (!input || !key || state.editingMessageId || state.replyingMessage) return;
+      const value = localStorage.getItem(key) || '';
+      if (value && !input.value) input.value = value;
+      updateMessageCounterV4();
+    }
+
+    function clearCurrentDraftV4() {
+      const key = getDraftKeyV4();
+      if (key) localStorage.removeItem(key);
+      updateMessageCounterV4();
+    }
+
+    function getStarsV4(chatId = state.activeRoomId) {
+      const key = chatId ? v4StorageKey(SAPA_V4.starsPrefix, chatId) : '';
+      return key ? safeJSONParseV4(localStorage.getItem(key) || '[]', []) : [];
+    }
+
+    function saveStarsV4(list, chatId = state.activeRoomId) {
+      const key = chatId ? v4StorageKey(SAPA_V4.starsPrefix, chatId) : '';
+      if (!key) return;
+      localStorage.setItem(key, JSON.stringify((Array.isArray(list) ? list : []).slice(0, 300)));
+    }
+
+    function isMessageStarredV4(messageId) {
+      return getStarsV4().some((item) => item.id === messageId);
+    }
+
+    window.toggleStarSelectedMessageV4 = function() {
+      const selected = state.selectedMessage;
+      if (!selected?.id || !selected.data) return;
+      const list = getStarsV4();
+      const existing = list.findIndex((item) => item.id === selected.id);
+      if (existing >= 0) list.splice(existing, 1);
+      else list.unshift({
+        id: selected.id,
+        senderName: selected.data.senderName || 'Pengguna',
+        preview: getMessagePreview(selected.data),
+        createdAtMs: timestampToMillis(selected.data.createdAt) || Date.now(),
+        savedAtMs: Date.now()
+      });
+      saveStarsV4(list);
+      window.closeMessageActions();
+      showV4Toast(existing >= 0 ? 'Pesan dihapus dari Tersimpan.' : 'Pesan disimpan ⭐');
+    };
+
+    function logV4Error(kind, detail) {
+      try {
+        const logs = safeJSONParseV4(localStorage.getItem(SAPA_V4.logsKey) || '[]', []);
+        logs.unshift({
+          at: new Date().toISOString(),
+          kind: String(kind || 'error').slice(0, 60),
+          detail: String(detail || '').slice(0, 1200),
+          route: state.activeRoomId ? `chat:${state.activeChatType}:${state.activeRoomId}` : `tab:${state.activeTab}`,
+          version: SAPA_V4_VERSION
+        });
+        localStorage.setItem(SAPA_V4.logsKey, JSON.stringify(logs.slice(0, SAPA_V4.maxErrorLogs)));
+      } catch (_) {}
+    }
+
+    window.addEventListener('error', (event) => logV4Error('window.error', event?.error?.stack || event?.message || 'Unknown error'));
+    window.addEventListener('unhandledrejection', (event) => logV4Error('unhandledrejection', event?.reason?.stack || event?.reason || 'Unknown rejection'));
+
+    function showV4Toast(message, tone = 'default') {
+      ensureV4UI();
+      const toast = $('sapa-v4-toast');
+      if (!toast) return;
+      toast.textContent = message;
+      toast.dataset.tone = tone;
+      toast.classList.remove('hidden');
+      clearTimeout(state.v4ToastTimer);
+      state.v4ToastTimer = setTimeout(() => toast.classList.add('hidden'), 2200);
+    }
+
+    function ensureV4Style() {
+      if ($('sapa-v4-style')) return;
+      const style = document.createElement('style');
+      style.id = 'sapa-v4-style';
+      style.textContent = `
+        .sapa-reduce-motion-v4 *, .sapa-reduce-motion-v4 *::before, .sapa-reduce-motion-v4 *::after { animation-duration:.001ms !important; animation-iteration-count:1 !important; transition-duration:.001ms !important; scroll-behavior:auto !important; }
+        .v4-setting-card { border-radius:1.35rem; padding:1rem; background:rgba(255,255,255,.72); border:1px solid rgba(226,232,240,.82); }
+        .dark .v4-setting-card { background:rgba(15,23,42,.58); border-color:rgba(71,85,105,.72); }
+        .v4-setting-row { display:flex; align-items:center; justify-content:space-between; gap:.8rem; padding:.75rem 0; border-bottom:1px solid rgba(148,163,184,.14); }
+        .v4-setting-row:last-child { border-bottom:0; }
+        .v4-select { min-width:7.6rem; border-radius:.85rem; padding:.55rem .65rem; font-size:.75rem; font-weight:900; background:rgba(241,245,249,.94); outline:none; }
+        .dark .v4-select { background:rgba(30,41,59,.95); }
+        .v4-toggle { width:2.8rem; height:1.55rem; border-radius:999px; padding:.16rem; background:#cbd5e1; transition:.15s; flex-shrink:0; }
+        .v4-toggle span { display:block; width:1.23rem; height:1.23rem; border-radius:999px; background:white; box-shadow:0 2px 5px rgba(0,0,0,.18); transition:.15s; }
+        .v4-toggle.active { background:#14b8a6; }
+        .v4-toggle.active span { transform:translateX(1.22rem); }
+        #sapa-v4-network { position:absolute; z-index:130; top:.65rem; left:50%; transform:translateX(-50%); padding:.45rem .8rem; border-radius:999px; font-size:.7rem; font-weight:1000; box-shadow:0 8px 22px rgba(2,6,23,.2); pointer-events:none; }
+        #sapa-v4-network.offline { background:#ef4444; color:white; }
+        #sapa-v4-network.online-flash { background:#22c55e; color:white; }
+        #sapa-v4-toast { position:absolute; z-index:150; left:1rem; right:1rem; bottom:calc(var(--sapa-mobile-bottom-gap,1rem) + 6rem); margin:auto; max-width:22rem; padding:.82rem 1rem; border-radius:1rem; background:rgba(15,23,42,.94); color:white; text-align:center; font-size:.78rem; font-weight:900; box-shadow:0 16px 40px rgba(2,6,23,.28); }
+        #sapa-v4-toast[data-tone="danger"] { background:rgba(185,28,28,.97); }
+        .v4-search-item { width:100%; text-align:left; padding:.78rem; border-radius:1rem; background:rgba(248,250,252,.82); border:1px solid rgba(226,232,240,.82); }
+        .dark .v4-search-item { background:rgba(15,23,42,.62); border-color:rgba(71,85,105,.72); }
+        .v4-search-highlight { background:rgba(250,204,21,.3); border-radius:.2rem; padding:0 .08rem; }
+        #message-counter-v4 { font-size:.58rem; font-weight:900; color:#94a3b8; min-width:2.9rem; text-align:center; }
+        #message-counter-v4.warn { color:#f59e0b; }
+        #message-counter-v4.limit { color:#ef4444; }
+        .v4-danger-btn { width:100%; border-radius:1rem; padding:.8rem; background:rgba(239,68,68,.10); color:#ef4444; font-weight:1000; font-size:.78rem; }
+      `;
+      document.head.appendChild(style);
+    }
+
+    function ensureV4UI() {
+      ensureV4Style();
+      const appShell = document.querySelector('body > .w-full.max-w-md');
+      if (!appShell) return;
+
+      if (!$('sapa-v4-network')) {
+        const el = document.createElement('div');
+        el.id = 'sapa-v4-network';
+        el.className = 'hidden';
+        appShell.appendChild(el);
+      }
+      if (!$('sapa-v4-toast')) {
+        const el = document.createElement('div');
+        el.id = 'sapa-v4-toast';
+        el.className = 'hidden';
+        appShell.appendChild(el);
+      }
+
+      if (!$('modal-v4-settings')) {
+        const modal = document.createElement('div');
+        modal.id = 'modal-v4-settings';
+        modal.className = 'hidden absolute inset-0 z-[125] items-center justify-center p-4 backdrop-blur-sm bg-black/60';
+        modal.innerHTML = `<div class="sapa-modal-card rounded-3xl w-full max-w-sm p-5 max-h-[88vh] overflow-y-auto animate-popup relative">
+          <button onclick="window.closeV4Settings()" class="absolute top-4 right-4 w-9 h-9 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center"><i class="fas fa-times"></i></button>
+          <div class="w-12 h-12 rounded-2xl bg-sapa-light/15 text-sapa-light flex items-center justify-center mb-4"><i class="fas fa-shield-halved"></i></div>
+          <h2 class="text-xl font-black">Keamanan & Privasi</h2>
+          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1 mb-4">Kontrol visibilitas dan interaksi akun Sapa.</p>
+          <div class="v4-setting-card mb-3">
+            <div class="v4-setting-row"><div><p class="font-black text-sm">Terakhir dilihat</p><p class="text-[11px] text-gray-500">Atur presence akunmu</p></div><select id="v4-last-seen" class="v4-select" onchange="window.updateV4PrivacySelect('lastSeen',this.value)"><option value="everyone">Semua</option><option value="contacts">Kontak</option><option value="nobody">Tidak ada</option></select></div>
+            <div class="v4-setting-row"><div><p class="font-black text-sm">Pesan pribadi</p><p class="text-[11px] text-gray-500">Siapa yang boleh menghubungi</p></div><select id="v4-allow-message" class="v4-select" onchange="window.updateV4PrivacySelect('allowMessages',this.value)"><option value="everyone">Semua</option><option value="contacts">Kontak</option><option value="nobody">Tidak ada</option></select></div>
+            <div class="v4-setting-row"><div><p class="font-black text-sm">Panggilan suara</p><p class="text-[11px] text-gray-500">Siapa yang boleh menelepon</p></div><select id="v4-allow-call" class="v4-select" onchange="window.updateV4PrivacySelect('allowCalls',this.value)"><option value="everyone">Semua</option><option value="contacts">Kontak</option><option value="nobody">Tidak ada</option></select></div>
+            <div class="v4-setting-row"><div><p class="font-black text-sm">Laporan dibaca</p><p class="text-[11px] text-gray-500">Kirim tanda pesan dibaca</p></div><button id="v4-read-toggle" class="v4-toggle" onclick="window.toggleV4PrivacyBool('readReceipts')"><span></span></button></div>
+            <div class="v4-setting-row"><div><p class="font-black text-sm">Sedang mengetik</p><p class="text-[11px] text-gray-500">Bagikan indikator typing</p></div><button id="v4-typing-toggle" class="v4-toggle" onclick="window.toggleV4PrivacyBool('typingIndicator')"><span></span></button></div>
+          </div>
+          <div class="v4-setting-card mb-3">
+            <p class="font-black mb-2">Akun</p>
+            <button onclick="window.v4SendEmailVerification()" class="w-full rounded-xl bg-sapa-light text-white py-3 text-xs font-black mb-2"><i class="fas fa-envelope-circle-check mr-1"></i>Verifikasi Email</button>
+            <button onclick="window.openBlockedUsersV4()" class="w-full rounded-xl bg-gray-100 dark:bg-gray-700 py-3 text-xs font-black"><i class="fas fa-ban mr-1"></i>Pengguna Diblokir <span id="v4-block-count"></span></button>
+          </div>
+          <p class="text-[10px] text-gray-400 font-bold leading-relaxed">Catatan: pembatasan privasi disimpan dan diterapkan oleh aplikasi. Untuk penegakan anti-bypass penuh, Firestore Security Rules harus mengikuti kebijakan yang sama.</p>
+        </div>`;
+        appShell.appendChild(modal);
+      }
+
+      if (!$('modal-v4-performance')) {
+        const modal = document.createElement('div');
+        modal.id = 'modal-v4-performance';
+        modal.className = 'hidden absolute inset-0 z-[125] items-center justify-center p-4 backdrop-blur-sm bg-black/60';
+        modal.innerHTML = `<div class="sapa-modal-card rounded-3xl w-full max-w-sm p-5 max-h-[88vh] overflow-y-auto animate-popup relative">
+          <button onclick="window.closeV4Performance()" class="absolute top-4 right-4 w-9 h-9 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center"><i class="fas fa-times"></i></button>
+          <div class="w-12 h-12 rounded-2xl bg-blue-500/15 text-blue-500 flex items-center justify-center mb-4"><i class="fas fa-gauge-high"></i></div>
+          <h2 class="text-xl font-black">Data & Performa</h2>
+          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1 mb-4">Optimasi untuk perangkat dan koneksi yang berbeda.</p>
+          <div class="v4-setting-card">
+            <div class="v4-setting-row"><div><p class="font-black text-sm">Data Saver</p><p class="text-[11px] text-gray-500">Kompresi gambar lebih agresif</p></div><button id="v4-data-toggle" class="v4-toggle" onclick="window.toggleV4PerformanceBool('dataSaver')"><span></span></button></div>
+            <div class="v4-setting-row"><div><p class="font-black text-sm">Kurangi Animasi</p><p class="text-[11px] text-gray-500">Lebih ringan & nyaman</p></div><button id="v4-motion-toggle" class="v4-toggle" onclick="window.toggleV4PerformanceBool('reduceMotion')"><span></span></button></div>
+          </div>
+          <div class="mt-4 rounded-2xl bg-amber-50 dark:bg-amber-900/20 p-3 text-xs font-bold text-amber-700 dark:text-amber-200"><i class="fas fa-database mr-1"></i>Media tetap memakai Firestore-inline. V4 hanya mengurangi ukuran payload bila Data Saver aktif.</div>
+        </div>`;
+        appShell.appendChild(modal);
+      }
+
+      if (!$('modal-v4-chat-search')) {
+        const modal = document.createElement('div');
+        modal.id = 'modal-v4-chat-search';
+        modal.className = 'hidden absolute inset-0 z-[126] items-start justify-center p-4 pt-10 backdrop-blur-sm bg-black/60';
+        modal.innerHTML = `<div class="sapa-modal-card rounded-3xl w-full max-w-sm p-4 max-h-[84vh] flex flex-col animate-popup">
+          <div class="flex items-center gap-2 mb-3"><button onclick="window.closeChatSearchV4()" class="w-10 h-10 rounded-2xl bg-gray-100 dark:bg-gray-700"><i class="fas fa-arrow-left"></i></button><div class="flex-1 rounded-2xl bg-gray-100 dark:bg-gray-900/70 px-4 flex items-center gap-2"><i class="fas fa-magnifying-glass text-gray-400"></i><input id="v4-chat-search-input" oninput="window.renderChatSearchV4()" placeholder="Cari pesan di percakapan ini" class="w-full bg-transparent py-3 focus:outline-none text-sm font-bold"></div></div>
+          <p id="v4-chat-search-count" class="text-[11px] font-bold text-gray-400 px-1 mb-2"></p>
+          <div id="v4-chat-search-results" class="flex-1 overflow-y-auto space-y-2"></div>
+        </div>`;
+        appShell.appendChild(modal);
+      }
+
+      if (!$('modal-v4-stars')) {
+        const modal = document.createElement('div');
+        modal.id = 'modal-v4-stars';
+        modal.className = 'hidden absolute inset-0 z-[126] items-start justify-center p-4 pt-10 backdrop-blur-sm bg-black/60';
+        modal.innerHTML = `<div class="sapa-modal-card rounded-3xl w-full max-w-sm p-4 max-h-[84vh] flex flex-col animate-popup">
+          <div class="flex items-center gap-2 mb-3"><button onclick="window.closeStarsV4()" class="w-10 h-10 rounded-2xl bg-gray-100 dark:bg-gray-700"><i class="fas fa-arrow-left"></i></button><div><p class="font-black">Pesan Tersimpan</p><p class="text-[11px] text-gray-500">Bookmark lokal untuk percakapan ini</p></div></div>
+          <div id="v4-stars-results" class="flex-1 overflow-y-auto space-y-2"></div>
+        </div>`;
+        appShell.appendChild(modal);
+      }
+
+      if (!$('modal-v4-diagnostics')) {
+        const modal = document.createElement('div');
+        modal.id = 'modal-v4-diagnostics';
+        modal.className = 'hidden absolute inset-0 z-[126] items-center justify-center p-4 backdrop-blur-sm bg-black/60';
+        modal.innerHTML = `<div class="sapa-modal-card rounded-3xl w-full max-w-sm p-5 max-h-[86vh] overflow-y-auto animate-popup relative">
+          <button onclick="window.closeDiagnosticsV4()" class="absolute top-4 right-4 w-9 h-9 rounded-full bg-gray-100 dark:bg-gray-700"><i class="fas fa-times"></i></button>
+          <div class="w-12 h-12 rounded-2xl bg-purple-500/15 text-purple-500 flex items-center justify-center mb-4"><i class="fas fa-stethoscope"></i></div>
+          <h2 class="text-xl font-black">Sapa Diagnostics</h2>
+          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1 mb-4">Ringkasan kondisi client untuk membantu debug.</p>
+          <div id="v4-diagnostics-content" class="space-y-2"></div>
+          <button onclick="window.copyDiagnosticsV4()" class="w-full mt-4 rounded-xl bg-sapa-light text-white py-3 text-xs font-black"><i class="fas fa-copy mr-1"></i>Salin Diagnostik</button>
+          <button onclick="window.clearDiagnosticsV4()" class="w-full mt-2 rounded-xl bg-gray-100 dark:bg-gray-700 py-3 text-xs font-black">Hapus Log Error Lokal</button>
+        </div>`;
+        appShell.appendChild(modal);
+      }
+    }
+
+    function ensureV4SettingsRows() {
+      const settingsList = $('view-settings');
+      if (!settingsList || $('v4-settings-section')) return;
+      const section = document.createElement('div');
+      section.id = 'v4-settings-section';
+      section.innerHTML = `<p class="section-title">SAPA V4</p><div class="settings-card rounded-3xl p-2 settings-list">
+        <button class="settings-row compact w-full text-left" onclick="window.openV4Settings()"><div class="settings-icon bg-gradient-to-br from-emerald-400 to-teal-600"><i class="fas fa-shield-halved"></i></div><div class="flex-1 min-w-0"><p class="font-black">Keamanan & Privasi</p><p id="v4-privacy-summary" class="text-sm text-gray-500 dark:text-gray-400 truncate">Read receipt, presence, blokir</p></div><i class="fas fa-chevron-right text-gray-400 text-xs"></i></button>
+        <div class="soft-divider"></div>
+        <button class="settings-row compact w-full text-left" onclick="window.openV4Performance()"><div class="settings-icon bg-gradient-to-br from-blue-400 to-indigo-600"><i class="fas fa-gauge-high"></i></div><div class="flex-1 min-w-0"><p class="font-black">Data & Performa</p><p id="v4-performance-summary" class="text-sm text-gray-500 dark:text-gray-400 truncate">Data Saver & animasi</p></div><i class="fas fa-chevron-right text-gray-400 text-xs"></i></button>
+        <div class="soft-divider"></div>
+        <button class="settings-row compact w-full text-left" onclick="window.openDiagnosticsV4()"><div class="settings-icon bg-gradient-to-br from-violet-400 to-purple-600"><i class="fas fa-stethoscope"></i></div><div class="flex-1 min-w-0"><p class="font-black">Diagnostik</p><p class="text-sm text-gray-500 dark:text-gray-400 truncate">Status koneksi & error client</p></div><i class="fas fa-chevron-right text-gray-400 text-xs"></i></button>
+      </div>`;
+      settingsList.appendChild(section);
+    }
+
+    function ensureForgotPasswordV4() {
+      if ($('v4-forgot-password')) return;
+      const toggle = $('auth-toggle-btn');
+      if (!toggle?.parentElement) return;
+      const btn = document.createElement('button');
+      btn.id = 'v4-forgot-password';
+      btn.className = 'w-full text-xs font-black text-gray-500 dark:text-gray-400 py-1';
+      btn.innerHTML = '<i class="fas fa-key mr-1"></i>Lupa password?';
+      btn.onclick = () => window.v4ForgotPassword();
+      toggle.insertAdjacentElement('afterend', btn);
+    }
+
+    function ensureMessageToolsV4() {
+      const input = $('message-input');
+      if (input) {
+        input.maxLength = SAPA_V4.maxTextChars;
+        if (!$('message-counter-v4')) {
+          const counter = document.createElement('span');
+          counter.id = 'message-counter-v4';
+          counter.textContent = `0/${SAPA_V4.maxTextChars}`;
+          input.insertAdjacentElement('afterend', counter);
+        }
+      }
+
+      const chatHeader = $('chat-title')?.closest('.flex.items-center');
+      if (chatHeader && !$('chat-search-btn-v4')) {
+        const search = document.createElement('button');
+        search.id = 'chat-search-btn-v4';
+        search.className = 'chat-header-action ml-2';
+        search.title = 'Cari pesan';
+        search.innerHTML = '<i class="fas fa-magnifying-glass"></i>';
+        search.onclick = () => window.openChatSearchV4();
+        const infoBtn = Array.from(chatHeader.querySelectorAll('button')).find((b) => b.title === 'Info Room');
+        chatHeader.insertBefore(search, infoBtn || null);
+
+        const star = document.createElement('button');
+        star.id = 'chat-stars-btn-v4';
+        star.className = 'chat-header-action ml-2';
+        star.title = 'Pesan tersimpan';
+        star.innerHTML = '<i class="fas fa-star"></i>';
+        star.onclick = () => window.openStarsV4();
+        chatHeader.insertBefore(star, infoBtn || null);
+      }
+
+      const actionsContainer = $('btn-delete-message')?.parentElement;
+      if (actionsContainer && !$('btn-star-message-v4')) {
+        const btn = document.createElement('button');
+        btn.id = 'btn-star-message-v4';
+        btn.className = 'action-sheet-btn bg-yellow-50 text-yellow-700 dark:bg-yellow-900/25 dark:text-yellow-200';
+        btn.innerHTML = '<i class="fas fa-star"></i>Simpan / Lepas pesan';
+        btn.onclick = () => window.toggleStarSelectedMessageV4();
+        actionsContainer.insertBefore(btn, $('btn-delete-message'));
+      }
+    }
+
+    function ensureProfileSafetyActionsV4() {
+      const actionGrid = $('profile-message-btn')?.parentElement;
+      if (!actionGrid || $('profile-safety-v4')) return;
+      const box = document.createElement('div');
+      box.id = 'profile-safety-v4';
+      box.className = 'grid grid-cols-3 gap-2 mt-2';
+      box.innerHTML = `<button onclick="window.copyViewedUsernameV4()" class="profile-action-btn bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-100"><i class="fas fa-copy text-lg"></i>Salin ID</button><button id="profile-block-v4" onclick="window.toggleViewedUserBlockV4()" class="profile-action-btn bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-200"><i class="fas fa-ban text-lg"></i>Blokir</button><button onclick="window.reportViewedUserV4()" class="profile-action-btn bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-200"><i class="fas fa-flag text-lg"></i>Report</button>`;
+      actionGrid.insertAdjacentElement('afterend', box);
+    }
+
+    function updateV4SettingsSummary() {
+      const prefs = state.v4Prefs || V4_DEFAULT_PREFS;
+      if ($('v4-privacy-summary')) $('v4-privacy-summary').innerText = `${prefs.privacy?.readReceipts ? 'Read receipt ON' : 'Read receipt OFF'} · ${state.v4Blocked?.size || 0} diblokir`;
+      if ($('v4-performance-summary')) $('v4-performance-summary').innerText = `${prefs.performance?.dataSaver ? 'Data Saver ON' : 'Data Saver OFF'} · ${prefs.performance?.reduceMotion ? 'Animasi minim' : 'Animasi normal'}`;
+      if ($('v4-block-count')) $('v4-block-count').innerText = `(${state.v4Blocked?.size || 0})`;
+      const toggleState = (id, active) => $(id)?.classList.toggle('active', !!active);
+      toggleState('v4-read-toggle', prefs.privacy?.readReceipts);
+      toggleState('v4-typing-toggle', prefs.privacy?.typingIndicator);
+      toggleState('v4-data-toggle', prefs.performance?.dataSaver);
+      toggleState('v4-motion-toggle', prefs.performance?.reduceMotion);
+      if ($('v4-last-seen')) $('v4-last-seen').value = prefs.privacy?.lastSeen || 'everyone';
+      if ($('v4-allow-message')) $('v4-allow-message').value = prefs.privacy?.allowMessages || 'everyone';
+      if ($('v4-allow-call')) $('v4-allow-call').value = prefs.privacy?.allowCalls || 'everyone';
+    }
+
+    window.openV4Settings = function() { ensureV4UI(); updateV4SettingsSummary(); $('modal-v4-settings')?.classList.replace('hidden', 'flex'); };
+    window.closeV4Settings = function() { $('modal-v4-settings')?.classList.replace('flex', 'hidden'); };
+    window.openV4Performance = function() { ensureV4UI(); updateV4SettingsSummary(); $('modal-v4-performance')?.classList.replace('hidden', 'flex'); };
+    window.closeV4Performance = function() { $('modal-v4-performance')?.classList.replace('flex', 'hidden'); };
+
+    window.updateV4PrivacySelect = async function(key, value) {
+      await saveV4Prefs({ privacy: { [key]: value } });
+      if (key === 'lastSeen' && value === 'nobody') updateMyPresence(false);
+      showV4Toast('Preferensi privasi disimpan.');
+    };
+    window.toggleV4PrivacyBool = async function(key) {
+      const next = !state.v4Prefs?.privacy?.[key];
+      await saveV4Prefs({ privacy: { [key]: next } });
+      showV4Toast(next ? 'Fitur diaktifkan.' : 'Fitur dimatikan.');
+    };
+    window.toggleV4PerformanceBool = async function(key) {
+      const next = !state.v4Prefs?.performance?.[key];
+      await saveV4Prefs({ performance: { [key]: next } });
+      showV4Toast(next ? 'Mode diaktifkan.' : 'Mode dimatikan.');
+    };
+
+    window.v4ForgotPassword = async function() {
+      const email = String($('auth-email')?.value || '').trim();
+      if (!email) return alert('Isi email akun Sapa terlebih dahulu.');
+      try {
+        const module = await import('https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js');
+        await module.sendPasswordResetEmail(auth, email);
+        alert('Link reset password sudah dikirim. Cek inbox dan folder spam.');
+      } catch (error) {
+        logV4Error('password-reset', error?.message || error);
+        alert(error?.message || 'Gagal mengirim reset password.');
+      }
+    };
+
+    window.v4SendEmailVerification = async function() {
+      const user = auth.currentUser;
+      if (!user) return alert('Login dulu.');
+      if (user.emailVerified) return alert('Email akun ini sudah terverifikasi.');
+      try {
+        const module = await import('https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js');
+        await module.sendEmailVerification(user);
+        alert('Email verifikasi dikirim. Buka inbox lalu klik link verifikasi.');
+      } catch (error) {
+        logV4Error('email-verification', error?.message || error);
+        alert(error?.message || 'Gagal mengirim verifikasi email.');
+      }
+    };
+
+    window.copyViewedUsernameV4 = async function() {
+      const user = state.viewedUser;
+      if (!user) return;
+      const value = user.username ? `@${user.username}` : user.uid;
+      try { await navigator.clipboard.writeText(value); showV4Toast(`${value} disalin.`); }
+      catch (_) { alert(value); }
+    };
+
+    window.toggleViewedUserBlockV4 = async function() {
+      const uid = state.viewedUser?.uid;
+      if (!uid || uid === state.user?.uid) return;
+      const wasBlocked = isBlockedV4(uid);
+      const next = !wasBlocked;
+      if (next && !confirm(`Blokir ${state.viewedUser?.displayName || 'pengguna ini'}? Kamu tidak bisa memulai chat/call dengannya dari akun ini.`)) return;
+      if (next) state.v4Blocked.add(uid); else state.v4Blocked.delete(uid);
+      persistV4Blocked();
+      await syncBlockToCloudV4(uid, next);
+      updateViewedUserSafetyV4();
+      updateV4SettingsSummary();
+      showV4Toast(next ? 'Pengguna diblokir.' : 'Blokir dibuka.');
+    };
+
+    function updateViewedUserSafetyV4() {
+      const uid = state.viewedUser?.uid;
+      const blocked = isBlockedV4(uid);
+      const btn = $('profile-block-v4');
+      if (btn) btn.innerHTML = blocked ? '<i class="fas fa-unlock text-lg"></i>Buka Blokir' : '<i class="fas fa-ban text-lg"></i>Blokir';
+      ['profile-message-btn','profile-call-btn'].forEach((id) => { if ($(id)) $(id).disabled = blocked; });
+      if ($('profile-message-btn')) $('profile-message-btn').classList.toggle('opacity-40', blocked);
+      if ($('profile-call-btn')) $('profile-call-btn').classList.toggle('opacity-40', blocked);
+    }
+
+    window.reportViewedUserV4 = async function() {
+      const target = state.viewedUser;
+      if (!target?.uid || !state.user) return;
+      const reason = prompt('Alasan report?\nContoh: spam, penipuan, pelecehan, konten tidak pantas.');
+      if (!reason?.trim()) return;
+      const payload = {
+        reporterUid: state.user.uid,
+        targetUid: target.uid,
+        targetUsername: target.username || '',
+        reason: String(reason).trim().slice(0, 500),
+        roomId: state.activeRoomId || '',
+        createdAtMs: Date.now(),
+        createdAt: serverTimestamp(),
+        status: 'open',
+        appVersion: SAPA_V4_VERSION
+      };
+      try {
+        await addDoc(collection(db, 'reports'), payload);
+        showV4Toast('Report terkirim. Terima kasih.');
+      } catch (error) {
+        const pending = safeJSONParseV4(localStorage.getItem('sapa_v4_pending_reports') || '[]', []);
+        pending.unshift({ ...payload, createdAt: null });
+        localStorage.setItem('sapa_v4_pending_reports', JSON.stringify(pending.slice(0, 20)));
+        logV4Error('report-write', error?.message || error);
+        alert('Report disimpan di perangkat, tetapi Firestore Rules belum mengizinkan collection reports.');
+      }
+    };
+
+    window.openBlockedUsersV4 = function() {
+      const ids = Array.from(state.v4Blocked || []);
+      alert(ids.length ? `UID diblokir (${ids.length}):\n\n${ids.join('\n')}` : 'Belum ada pengguna yang diblokir.');
+    };
+
+    function updateMessageCounterV4() {
+      const input = $('message-input');
+      const counter = $('message-counter-v4');
+      if (!input || !counter) return;
+      const len = String(input.value || '').length;
+      counter.textContent = `${len}/${SAPA_V4.maxTextChars}`;
+      counter.classList.toggle('warn', len >= SAPA_V4.maxTextChars * .8 && len < SAPA_V4.maxTextChars);
+      counter.classList.toggle('limit', len >= SAPA_V4.maxTextChars);
+    }
+
+    window.openChatSearchV4 = function() {
+      if (!state.activeRoomId) return;
+      ensureV4UI();
+      $('modal-v4-chat-search')?.classList.replace('hidden', 'flex');
+      if ($('v4-chat-search-input')) $('v4-chat-search-input').value = '';
+      window.renderChatSearchV4();
+      setTimeout(() => $('v4-chat-search-input')?.focus(), 100);
+    };
+    window.closeChatSearchV4 = function() { $('modal-v4-chat-search')?.classList.replace('flex', 'hidden'); };
+
+    window.renderChatSearchV4 = function() {
+      const term = normalizeSearchText($('v4-chat-search-input')?.value || '');
+      const box = $('v4-chat-search-results');
+      if (!box) return;
+      const messages = Array.from(state.messageCache?.entries?.() || []).map(([id, data]) => ({ id, data }));
+      const result = term ? messages.filter(({ data }) => {
+        if (!data || data.isDeleted || ['message_action','room_action','call_signal'].includes(data.type)) return false;
+        return normalizeSearchText(`${data.text || ''} ${data.senderName || ''} ${data.fileName || ''} ${getMessagePreview(data)}`).includes(term);
+      }).sort((a,b) => timestampToMillis(b.data.createdAt) - timestampToMillis(a.data.createdAt)).slice(0, 80) : [];
+      if ($('v4-chat-search-count')) $('v4-chat-search-count').innerText = term ? `${result.length} hasil pada pesan yang sedang dimuat` : `${messages.length} pesan tersedia untuk pencarian lokal`;
+      if (!term) {
+        box.innerHTML = '<div class="p-6 text-center text-gray-400"><i class="fas fa-magnifying-glass text-3xl mb-3 opacity-50"></i><p class="font-black">Cari teks, nama pengirim, atau nama file</p></div>';
+        return;
+      }
+      if (!result.length) {
+        box.innerHTML = '<div class="p-6 text-center text-gray-400 font-bold">Tidak ditemukan pada pesan yang sedang dimuat.</div>';
+        return;
+      }
+      box.innerHTML = result.map(({ id, data }) => `<button class="v4-search-item" onclick="window.jumpToSearchMessageV4('${escapeHTML(id)}')"><span class="block text-xs font-black text-sapa-dark dark:text-teal-300">${escapeHTML(data.senderName || 'Pengguna')} · ${escapeHTML(formatMessageTime(data.createdAt) || '')}</span><span class="block text-sm font-bold mt-1 line-clamp-3">${escapeHTML(getMessagePreview(data) || '(media)')}</span></button>`).join('');
+    };
+
+    window.jumpToSearchMessageV4 = function(messageId) {
+      window.closeChatSearchV4();
+      setTimeout(() => scrollToMessage(messageId), 100);
+    };
+
+    window.openStarsV4 = function() {
+      if (!state.activeRoomId) return;
+      ensureV4UI();
+      const box = $('v4-stars-results');
+      const list = getStarsV4();
+      if (box) {
+        box.innerHTML = list.length ? list.map((item) => `<button class="v4-search-item" onclick="window.jumpToStarV4('${escapeHTML(item.id)}')"><span class="block text-xs font-black text-yellow-600">⭐ ${escapeHTML(item.senderName || 'Pengguna')}</span><span class="block text-sm font-bold mt-1 line-clamp-3">${escapeHTML(item.preview || 'Pesan')}</span></button>`).join('') : '<div class="p-6 text-center text-gray-400"><i class="fas fa-star text-3xl mb-3 opacity-50"></i><p class="font-black">Belum ada pesan tersimpan</p><p class="text-xs mt-1">Tekan/klik pesan lalu pilih Simpan.</p></div>';
+      }
+      $('modal-v4-stars')?.classList.replace('hidden', 'flex');
+    };
+    window.closeStarsV4 = function() { $('modal-v4-stars')?.classList.replace('flex', 'hidden'); };
+    window.jumpToStarV4 = function(messageId) {
+      window.closeStarsV4();
+      if (!state.messageCache?.has?.(messageId)) return showV4Toast('Pesan lama belum dimuat di sesi ini.');
+      setTimeout(() => scrollToMessage(messageId), 80);
+    };
+
+    function renderDiagnosticsV4() {
+      const box = $('v4-diagnostics-content');
+      if (!box) return;
+      const logs = safeJSONParseV4(localStorage.getItem(SAPA_V4.logsKey) || '[]', []);
+      const quotaInfo = `${Math.round(JSON.stringify(localStorage).length / 1024)} KB localStorage estimasi`;
+      const cards = [
+        ['Versi', `Sapa V${SAPA_V4_VERSION}`],
+        ['Koneksi', navigator.onLine ? 'Online' : 'Offline'],
+        ['User', state.user?.uid ? state.user.uid.slice(0, 10) + '…' : 'Belum login'],
+        ['Percakapan aktif', state.activeRoomId ? `${state.activeChatType} · ${state.activeRoomId}` : 'Tidak ada'],
+        ['Message cache', `${state.messageCache?.size || 0} pesan`],
+        ['Room cache', `${state.roomsCache?.size || 0} room`],
+        ['Direct cache', `${state.directChatsCache?.size || 0} direct`],
+        ['Blokir lokal', `${state.v4Blocked?.size || 0} user`],
+        ['Error lokal', `${logs.length} log`],
+        ['Penyimpanan', quotaInfo],
+        ['Media mode', 'Firestore inline (dipertahankan)']
+      ];
+      box.innerHTML = cards.map(([label,value]) => `<div class="v4-setting-card"><p class="text-[10px] font-black text-gray-400">${escapeHTML(label)}</p><p class="font-black text-sm break-all">${escapeHTML(value)}</p></div>`).join('') + (logs[0] ? `<div class="v4-setting-card"><p class="text-[10px] font-black text-red-400">ERROR TERAKHIR</p><p class="text-xs font-bold break-all mt-1">${escapeHTML(logs[0].kind)} · ${escapeHTML(logs[0].detail)}</p></div>` : '');
+    }
+    window.openDiagnosticsV4 = function() { ensureV4UI(); renderDiagnosticsV4(); $('modal-v4-diagnostics')?.classList.replace('hidden', 'flex'); };
+    window.closeDiagnosticsV4 = function() { $('modal-v4-diagnostics')?.classList.replace('flex', 'hidden'); };
+    window.copyDiagnosticsV4 = async function() {
+      const logs = safeJSONParseV4(localStorage.getItem(SAPA_V4.logsKey) || '[]', []);
+      const payload = JSON.stringify({ version:SAPA_V4_VERSION, online:navigator.onLine, uid:state.user?.uid || '', activeChat:state.activeRoomId || '', activeType:state.activeChatType || '', messageCache:state.messageCache?.size || 0, rooms:state.roomsCache?.size || 0, directChats:state.directChatsCache?.size || 0, blocked:state.v4Blocked?.size || 0, logs }, null, 2);
+      try { await navigator.clipboard.writeText(payload); showV4Toast('Diagnostik disalin.'); } catch (_) { alert(payload); }
+    };
+    window.clearDiagnosticsV4 = function() { localStorage.removeItem(SAPA_V4.logsKey); renderDiagnosticsV4(); showV4Toast('Log lokal dihapus.'); };
+
+    function updateNetworkStateV4() {
+      ensureV4UI();
+      const el = $('sapa-v4-network');
+      if (!el) return;
+      state.v4NetworkOnline = navigator.onLine;
+      el.classList.remove('offline','online-flash');
+      if (!navigator.onLine) {
+        el.textContent = 'Offline · draft tetap disimpan';
+        el.classList.add('offline');
+        el.classList.remove('hidden');
+      } else {
+        el.textContent = 'Koneksi kembali online';
+        el.classList.add('online-flash');
+        el.classList.remove('hidden');
+        clearTimeout(state.v4NetworkTimer);
+        state.v4NetworkTimer = setTimeout(() => el.classList.add('hidden'), 1300);
+      }
+    }
+    window.addEventListener('online', updateNetworkStateV4);
+    window.addEventListener('offline', updateNetworkStateV4);
+
+    // Privacy hooks: tidak menulis read/typing ketika dimatikan.
+    const originalMarkVisibleMessagesReadV4 = markVisibleMessagesRead;
+    markVisibleMessagesRead = async function(messageDocs) {
+      if (state.v4Prefs?.privacy?.readReceipts === false) return;
+      return originalMarkVisibleMessagesReadV4(messageDocs);
+    };
+
+    const originalSetTypingStateV4 = setTypingState;
+    setTypingState = async function(isTyping) {
+      if (state.v4Prefs?.privacy?.typingIndicator === false) return;
+      return originalSetTypingStateV4(isTyping);
+    };
+
+    const originalUpdatePresenceV4 = updateMyPresence;
+    updateMyPresence = async function(online = true) {
+      const mode = state.v4Prefs?.privacy?.lastSeen || 'everyone';
+      if (mode === 'nobody') {
+        if (!state.user) return;
+        try { await setDoc(doc(db, 'users', state.user.uid), { online:false, lastSeenAtMs:0, updatedAt:serverTimestamp() }, { merge:true }); } catch (_) {}
+        return;
+      }
+      return originalUpdatePresenceV4(online);
+    };
+
+    // Data Saver tetap Firestore-inline, hanya menekan ukuran sebelum Base64 dibuat.
+    const originalCompressImageV4 = compressImage;
+    compressImage = function(file, maxDim = 800, quality = .7, type = 'image/jpeg') {
+      if (state.v4Prefs?.performance?.dataSaver) {
+        maxDim = Math.min(Number(maxDim || 800), 560);
+        quality = Math.min(Number(quality || .7), .52);
+      }
+      return originalCompressImageV4(file, maxDim, quality, type);
+    };
+
+    // Direct chat / call safety hooks.
+    const originalCreateOrOpenDirectChatV4 = createOrOpenDirectChat;
+    createOrOpenDirectChat = async function(otherUid, autoCall = false) {
+      if (isBlockedV4(otherUid)) throw new Error('Pengguna ini sedang kamu blokir. Buka blokir terlebih dahulu.');
+      const target = await findUserByUid(otherUid);
+      const targetPrivacy = target?.preferencesV4?.privacy || target?.privacyV4 || {};
+      if (targetPrivacy.allowMessages === 'nobody' && !autoCall) throw new Error('Pengguna ini menonaktifkan pesan pribadi.');
+      if (targetPrivacy.allowCalls === 'nobody' && autoCall) throw new Error('Pengguna ini menonaktifkan panggilan suara.');
+      return originalCreateOrOpenDirectChatV4(otherUid, autoCall);
+    };
+    window.startDirectChatWith = createOrOpenDirectChat;
+
+    const originalPublicUserProfileV4 = publicUserProfile;
+    publicUserProfile = function(data, uid = '') {
+      const profile = originalPublicUserProfileV4(data, uid);
+      return { ...profile, preferencesV4: data?.preferencesV4 || {}, privacyV4: data?.privacyV4 || {} };
+    };
+
+    const originalStartVoiceCallV4 = window.startVoiceCall;
+    window.startVoiceCall = async function() {
+      const otherUid = state.activeChatType === 'direct' ? (state.activeRoomData?.otherUid || getOtherParticipantUid(state.activeRoomData || {})) : '';
+      if (otherUid && isBlockedV4(otherUid)) return alert('Pengguna ini sedang kamu blokir.');
+      return originalStartVoiceCallV4();
+    };
+
+    // Draft + offline-safe text composer.
+    const originalHandleMessageInputChangeV4 = window.handleMessageInputChange;
+    window.handleMessageInputChange = function() {
+      const input = $('message-input');
+      if (input && input.value.length > SAPA_V4.maxTextChars) input.value = input.value.slice(0, SAPA_V4.maxTextChars);
+      saveCurrentDraftV4();
+      if (navigator.onLine) originalHandleMessageInputChangeV4?.();
+      updateMessageCounterV4();
+    };
+
+    const originalSendTextMessageV4 = window.sendTextMessage;
+    window.sendTextMessage = async function() {
+      const input = $('message-input');
+      const before = String(input?.value || '');
+      if (!before.trim()) return originalSendTextMessageV4();
+      if (!navigator.onLine) {
+        saveCurrentDraftV4();
+        showV4Toast('Offline. Pesan tetap sebagai draft dan belum dikirim.', 'danger');
+        return;
+      }
+      try {
+        await originalSendTextMessageV4();
+        if (!String(input?.value || '').trim()) clearCurrentDraftV4();
+      } catch (error) {
+        if (input && !input.value) input.value = before;
+        saveCurrentDraftV4();
+        logV4Error('send-message', error?.message || error);
+        alert(error?.message || 'Pesan gagal dikirim. Teks dipulihkan sebagai draft.');
+      }
+      updateMessageCounterV4();
+    };
+
+    // Restore draft setiap masuk chat, tanpa mengubah logic openChat/direct yang sudah ada.
+    const originalOpenChatV4 = window.openChat;
+    window.openChat = async function(code, name) {
+      const result = await originalOpenChatV4(code, name);
+      setTimeout(() => { restoreCurrentDraftV4(); ensureMessageToolsV4(); }, 220);
+      return result;
+    };
+    const originalOpenDirectChatV4 = window.openDirectChat;
+    window.openDirectChat = async function(chatId, suppliedProfile = null, suppliedStorage = null) {
+      const result = await originalOpenDirectChatV4(chatId, suppliedProfile, suppliedStorage);
+      setTimeout(() => { restoreCurrentDraftV4(); ensureMessageToolsV4(); }, 220);
+      return result;
+    };
+
+    // Profile safety UI selalu mengikuti user yang sedang dilihat.
+    const originalOpenUserProfileV4 = window.openUserProfile;
+    window.openUserProfile = async function(uid) {
+      await originalOpenUserProfileV4(uid);
+      ensureProfileSafetyActionsV4();
+      updateViewedUserSafetyV4();
+    };
+
+    // Tambahkan status verifikasi email di halaman profil sendiri.
+    function ensureOwnProfileV4() {
+      const card = $('profile-name')?.closest('.settings-card');
+      if (!card || $('profile-security-badge-v4')) return;
+      const badge = document.createElement('button');
+      badge.id = 'profile-security-badge-v4';
+      badge.className = 'mt-2 inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-[10px] font-black bg-gray-100 dark:bg-gray-700';
+      badge.onclick = () => window.v4SendEmailVerification();
+      card.querySelector('#profile-email')?.insertAdjacentElement('afterend', badge);
+      updateOwnProfileV4();
+    }
+
+    function updateOwnProfileV4() {
+      const badge = $('profile-security-badge-v4');
+      if (!badge) return;
+      const verified = !!auth.currentUser?.emailVerified;
+      badge.innerHTML = verified ? '<i class="fas fa-circle-check text-green-500"></i>Email terverifikasi' : '<i class="fas fa-triangle-exclamation text-amber-500"></i>Verifikasi email';
+    }
+
+    const originalUpdateCurrentUserUIV4 = updateCurrentUserUI;
+    updateCurrentUserUI = function() {
+      originalUpdateCurrentUserUIV4();
+      if (!state.user) return;
+      if (state.v4InitializedForUid !== state.user.uid) {
+        state.v4InitializedForUid = state.user.uid;
+        loadV4Prefs();
+        loadV4Blocked();
+      }
+      ensureV4UI();
+      ensureV4SettingsRows();
+      ensureForgotPasswordV4();
+      ensureMessageToolsV4();
+      ensureOwnProfileV4();
+      updateOwnProfileV4();
+      updateV4SettingsSummary();
+    };
+
+    // switchTab hook untuk memastikan elemen V4 tidak hilang oleh render lama.
+    const originalSwitchTabV4 = window.switchTab;
+    window.switchTab = function(tab) {
+      const result = originalSwitchTabV4(tab);
+      setTimeout(() => {
+        ensureV4UI();
+        ensureV4SettingsRows();
+        ensureOwnProfileV4();
+        updateV4SettingsSummary();
+      }, 30);
+      return result;
+    };
+
+    // Boot V4 juga untuk halaman login sebelum auth aktif.
+    ensureV4UI();
+    ensureForgotPasswordV4();
+    ensureMessageToolsV4();
+    updateNetworkStateV4();
+    console.info(`Sapa V${SAPA_V4_VERSION} hardening layer aktif — media tetap Firestore-inline.`);
 
   </script>
 </body>
