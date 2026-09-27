@@ -5,12 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Sapa Chat</title>
   <link rel="icon" type="image/png" href="sapa-icon-192.png">
-  <link rel="apple-touch-icon" href="sapa-icon-192.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="sapa-apple-touch-180.png">
   <link rel="manifest" href="manifest.webmanifest">
   <meta name="theme-color" content="#0f766e">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Sapa">
+  <meta name="format-detection" content="telephone=no">
   <!-- Isi public VAPID key Firebase di content agar push tetap masuk saat browser ditutup. -->
   <meta name="sapa-fcm-vapid-key" content="">
 
@@ -275,6 +277,7 @@
     .status-viewer-person-avatar img { width:100%; height:100%; object-fit:cover; }
 
   </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 </head>
 <body class="text-gray-800 dark:text-gray-200 antialiased h-screen w-full flex items-center justify-center overflow-hidden font-sans selection:bg-sapa-light selection:text-white transition-colors duration-300">
   <div class="bg-animated"></div>
@@ -4346,7 +4349,7 @@
         await registration.showNotification(title || 'Sapa', {
           body: body || 'Anda menerima pesan baru.',
           icon: './sapa-icon-192.png',
-          badge: './sapa-badge-96.png',
+          badge: './sapa-icon-192.png',
           tag: `${target?.kind || 'sapa'}:${target?.id || 'message'}`,
           renotify: true,
           vibrate: [180, 90, 180],
@@ -8270,7 +8273,7 @@
     // SAPA V4.0 — ARCHITECTURE & PRODUCT HARDENING LAYER
     // Media tetap Firestore-inline sesuai mode aplikasi saat ini.
     // =========================================================
-    const SAPA_V4_VERSION = '4.0.0';
+    const SAPA_V4_VERSION = '5.0.0';
     const SAPA_V4 = {
       maxTextChars: 4000,
       prefsPrefix: 'sapa_v4_prefs_',
@@ -8492,6 +8495,12 @@
         #message-counter-v4.warn { color:#f59e0b; }
         #message-counter-v4.limit { color:#ef4444; }
         .v4-danger-btn { width:100%; border-radius:1rem; padding:.8rem; background:rgba(239,68,68,.10); color:#ef4444; font-weight:1000; font-size:.78rem; }
+        .pwa-install-card-v41 { border-radius:1.35rem; padding:1rem; background:linear-gradient(135deg,rgba(20,184,166,.14),rgba(59,130,246,.10)); border:1px solid rgba(20,184,166,.24); }
+        .dark .pwa-install-card-v41 { background:linear-gradient(135deg,rgba(20,184,166,.12),rgba(30,64,175,.12)); border-color:rgba(45,212,191,.18); }
+        .pwa-install-badge-v41 { display:inline-flex; align-items:center; gap:.35rem; padding:.3rem .55rem; border-radius:999px; background:rgba(20,184,166,.14); color:#0f766e; font-size:.62rem; font-weight:1000; }
+        .dark .pwa-install-badge-v41 { color:#5eead4; }
+        #pwa-home-banner-v41 { margin-bottom:.75rem; }
+        @media (display-mode: standalone) { .pwa-web-only-v41 { display:none !important; } }
       `;
       document.head.appendChild(style);
     }
@@ -8581,6 +8590,23 @@
         appShell.appendChild(modal);
       }
 
+      if (!$('modal-pwa-install-v41')) {
+        const modal = document.createElement('div');
+        modal.id = 'modal-pwa-install-v41';
+        modal.className = 'hidden absolute inset-0 z-[129] items-center justify-center p-4 backdrop-blur-sm bg-black/60';
+        modal.innerHTML = `<div class="sapa-modal-card rounded-3xl w-full max-w-sm p-5 max-h-[88vh] overflow-y-auto animate-popup relative">
+          <button onclick="window.closePwaInstallV41()" class="absolute top-4 right-4 w-9 h-9 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center"><i class="fas fa-times"></i></button>
+          <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-teal-400 to-cyan-600 text-white flex items-center justify-center mb-4 shadow-lg"><i class="fas fa-mobile-screen-button text-xl"></i></div>
+          <span class="pwa-install-badge-v41"><i class="fas fa-bolt"></i>PWA</span>
+          <h2 class="text-2xl font-black mt-2">Install Sapa</h2>
+          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1 mb-4">Pasang Sapa seperti aplikasi: ikon di Home Screen, tampilan fullscreen, startup lebih cepat, dan shell dasar tetap bisa dibuka ketika koneksi bermasalah.</p>
+          <div id="pwa-install-instructions-v41" class="pwa-install-card-v41 text-sm leading-relaxed mb-4"></div>
+          <button id="pwa-install-action-v41" onclick="window.installSapaPwaV41()" class="btn-3d w-full bg-sapa-light text-white py-3.5 rounded-2xl font-black shadow-3d"><i class="fas fa-download mr-2"></i>Install Sapa</button>
+          <button onclick="window.closePwaInstallV41()" class="w-full mt-2 rounded-xl bg-gray-100 dark:bg-gray-700 py-3 text-xs font-black">Nanti Saja</button>
+        </div>`;
+        appShell.appendChild(modal);
+      }
+
       if (!$('modal-v4-diagnostics')) {
         const modal = document.createElement('div');
         modal.id = 'modal-v4-diagnostics';
@@ -8603,7 +8629,9 @@
       if (!settingsList || $('v4-settings-section')) return;
       const section = document.createElement('div');
       section.id = 'v4-settings-section';
-      section.innerHTML = `<p class="section-title">SAPA V4</p><div class="settings-card rounded-3xl p-2 settings-list">
+      section.innerHTML = `<p class="section-title">SAPA V4.1</p><div class="settings-card rounded-3xl p-2 settings-list">
+        <button id="pwa-settings-row-v41" class="settings-row compact w-full text-left" onclick="window.openPwaInstallV41()"><div class="settings-icon bg-gradient-to-br from-teal-400 to-cyan-600"><i class="fas fa-download"></i></div><div class="flex-1 min-w-0"><p class="font-black">Install Aplikasi Sapa</p><p id="pwa-settings-subtitle-v41" class="text-sm text-gray-500 dark:text-gray-400 truncate">Pasang ke Home Screen</p></div><i id="pwa-settings-chevron-v41" class="fas fa-chevron-right text-gray-400 text-xs"></i></button>
+        <div class="soft-divider"></div>
         <button class="settings-row compact w-full text-left" onclick="window.openV4Settings()"><div class="settings-icon bg-gradient-to-br from-emerald-400 to-teal-600"><i class="fas fa-shield-halved"></i></div><div class="flex-1 min-w-0"><p class="font-black">Keamanan & Privasi</p><p id="v4-privacy-summary" class="text-sm text-gray-500 dark:text-gray-400 truncate">Read receipt, presence, blokir</p></div><i class="fas fa-chevron-right text-gray-400 text-xs"></i></button>
         <div class="soft-divider"></div>
         <button class="settings-row compact w-full text-left" onclick="window.openV4Performance()"><div class="settings-icon bg-gradient-to-br from-blue-400 to-indigo-600"><i class="fas fa-gauge-high"></i></div><div class="flex-1 min-w-0"><p class="font-black">Data & Performa</p><p id="v4-performance-summary" class="text-sm text-gray-500 dark:text-gray-400 truncate">Data Saver & animasi</p></div><i class="fas fa-chevron-right text-gray-400 text-xs"></i></button>
@@ -9067,6 +9095,7 @@
       ensureOwnProfileV4();
       updateOwnProfileV4();
       updateV4SettingsSummary();
+      refreshPwaInstallUiV41?.();
     };
 
     // switchTab hook untuk memastikan elemen V4 tidak hilang oleh render lama.
@@ -9078,9 +9107,136 @@
         ensureV4SettingsRows();
         ensureOwnProfileV4();
         updateV4SettingsSummary();
+        refreshPwaInstallUiV41?.();
       }, 30);
       return result;
     };
+
+    // ===== SAPA V4.1 — PWA INSTALL EXPERIENCE =====
+    let deferredPwaPromptV41 = null;
+    const PWA_BANNER_DISMISS_KEY_V41 = 'sapa_pwa_banner_dismissed_until_v41';
+
+    function isStandalonePwaV41() {
+      return window.matchMedia?.('(display-mode: standalone)').matches || window.navigator.standalone === true;
+    }
+
+    function isIosV41() {
+      return /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    }
+
+    function isSafariV41() {
+      const ua = navigator.userAgent;
+      return /safari/i.test(ua) && !/chrome|crios|fxios|edgios|opr\//i.test(ua);
+    }
+
+    function pwaInstallTextV41() {
+      if (isStandalonePwaV41()) {
+        return '<p class="font-black text-emerald-600 dark:text-emerald-300"><i class="fas fa-circle-check mr-2"></i>Sapa sudah terpasang sebagai aplikasi.</p><p class="text-xs text-gray-500 dark:text-gray-400 mt-2">Buka Sapa dari ikon di Home Screen / daftar aplikasi perangkatmu.</p>';
+      }
+      if (isIosV41()) {
+        return `<p class="font-black mb-2">Cara install di iPhone / iPad</p>
+          <div class="space-y-2 text-sm">
+            <p><b>1.</b> Buka Sapa menggunakan <b>Safari</b>${isSafariV41() ? '' : ' terlebih dahulu'}.</p>
+            <p><b>2.</b> Tekan tombol <b>Share</b> <i class="fas fa-arrow-up-from-bracket"></i>.</p>
+            <p><b>3.</b> Pilih <b>Add to Home Screen</b>.</p>
+            <p><b>4.</b> Tekan <b>Add</b>.</p>
+          </div>`;
+      }
+      if (deferredPwaPromptV41) {
+        return '<p class="font-black mb-1">Sapa siap dipasang.</p><p class="text-xs text-gray-500 dark:text-gray-400">Tekan tombol <b>Install Sapa</b> di bawah. Browser akan menampilkan konfirmasi instalasi.</p>';
+      }
+      return `<p class="font-black mb-2">Install dari browser</p>
+        <p class="text-sm">Buka menu browser <b>⋮</b> lalu pilih <b>Install app</b> atau <b>Add to Home Screen</b>. Pastikan website dijalankan melalui HTTPS dan manifest/service worker berhasil dimuat.</p>`;
+    }
+
+    function refreshPwaInstallUiV41() {
+      ensureV4UI();
+      const installed = isStandalonePwaV41();
+      const subtitle = $('pwa-settings-subtitle-v41');
+      const chevron = $('pwa-settings-chevron-v41');
+      if (subtitle) subtitle.textContent = installed ? 'Sudah terpasang di perangkat' : (isIosV41() ? 'Tambahkan ke Home Screen' : 'Pasang ke perangkat');
+      if (chevron) chevron.className = installed ? 'fas fa-circle-check text-emerald-500 text-sm' : 'fas fa-chevron-right text-gray-400 text-xs';
+      const instructions = $('pwa-install-instructions-v41');
+      if (instructions) instructions.innerHTML = pwaInstallTextV41();
+      const action = $('pwa-install-action-v41');
+      if (action) {
+        action.classList.toggle('hidden', installed || isIosV41() || !deferredPwaPromptV41);
+        action.disabled = installed;
+      }
+      ensurePwaHomeBannerV41();
+    }
+
+    function ensurePwaHomeBannerV41() {
+      const view = $('view-chats');
+      if (!view) return;
+      const existing = $('pwa-home-banner-v41');
+      if (isStandalonePwaV41()) { existing?.remove(); return; }
+      const dismissedUntil = Number(localStorage.getItem(PWA_BANNER_DISMISS_KEY_V41) || 0);
+      if (dismissedUntil > Date.now()) { existing?.remove(); return; }
+      if (existing) return;
+      const banner = document.createElement('div');
+      banner.id = 'pwa-home-banner-v41';
+      banner.className = 'pwa-install-card-v41 pwa-web-only-v41 flex items-center gap-3';
+      banner.innerHTML = `<div class="w-11 h-11 rounded-2xl bg-gradient-to-br from-teal-400 to-cyan-600 text-white flex items-center justify-center shrink-0 shadow-md"><i class="fas fa-mobile-screen-button"></i></div>
+        <button class="flex-1 min-w-0 text-left" onclick="window.openPwaInstallV41()"><p class="font-black text-sm">Install Sapa</p><p class="text-[11px] text-gray-500 dark:text-gray-400 truncate">Buka seperti aplikasi dari Home Screen</p></button>
+        <button onclick="event.stopPropagation(); window.dismissPwaBannerV41()" class="w-8 h-8 rounded-full bg-white/60 dark:bg-gray-800/70 text-gray-400 flex items-center justify-center"><i class="fas fa-times text-xs"></i></button>`;
+      const profileCard = view.querySelector('.settings-card');
+      if (profileCard) profileCard.insertAdjacentElement('afterend', banner);
+      else view.prepend(banner);
+    }
+
+    window.dismissPwaBannerV41 = function() {
+      localStorage.setItem(PWA_BANNER_DISMISS_KEY_V41, String(Date.now() + 7 * 24 * 60 * 60 * 1000));
+      $('pwa-home-banner-v41')?.remove();
+    };
+
+    window.openPwaInstallV41 = function() {
+      ensureV4UI();
+      refreshPwaInstallUiV41();
+      $('modal-pwa-install-v41')?.classList.replace('hidden', 'flex');
+    };
+
+    window.closePwaInstallV41 = function() {
+      $('modal-pwa-install-v41')?.classList.replace('flex', 'hidden');
+    };
+
+    window.installSapaPwaV41 = async function() {
+      if (isStandalonePwaV41()) return showV4Toast('Sapa sudah terpasang di perangkat.');
+      if (isIosV41()) { refreshPwaInstallUiV41(); return; }
+      if (!deferredPwaPromptV41) {
+        refreshPwaInstallUiV41();
+        showV4Toast('Gunakan menu browser → Install app / Add to Home Screen.');
+        return;
+      }
+      try {
+        const promptEvent = deferredPwaPromptV41;
+        deferredPwaPromptV41 = null;
+        const result = await promptEvent.prompt();
+        if (result?.outcome === 'accepted') showV4Toast('Sapa sedang dipasang ke perangkat ✓');
+        else showV4Toast('Instalasi dibatalkan. Kamu bisa install nanti dari Pengaturan.');
+      } catch (error) {
+        logV4Error('pwa-install', error?.message || error);
+        showV4Toast('Prompt install tidak tersedia. Gunakan menu browser.', 'danger');
+      } finally {
+        refreshPwaInstallUiV41();
+      }
+    };
+
+    window.addEventListener('beforeinstallprompt', (event) => {
+      event.preventDefault();
+      deferredPwaPromptV41 = event;
+      refreshPwaInstallUiV41();
+    });
+
+    window.addEventListener('appinstalled', () => {
+      deferredPwaPromptV41 = null;
+      localStorage.removeItem(PWA_BANNER_DISMISS_KEY_V41);
+      window.closePwaInstallV41?.();
+      refreshPwaInstallUiV41();
+      showV4Toast('Sapa berhasil diinstall ✓');
+    });
+
+    window.matchMedia?.('(display-mode: standalone)').addEventListener?.('change', refreshPwaInstallUiV41);
 
     // Boot V4 juga untuk halaman login sebelum auth aktif.
     ensureV4UI();
@@ -9088,6 +9244,716 @@
     ensureMessageToolsV4();
     updateNetworkStateV4();
     console.info(`Sapa V${SAPA_V4_VERSION} hardening layer aktif — media tetap Firestore-inline.`);
+
+
+
+    // =========================================================
+    // SAPA V5.0 — MESSENGER EXPERIENCE LAYER
+    // WA/Telegram-inspired behavior while keeping Firestore-inline media.
+    // =========================================================
+    const SAPA_V5 = {
+      version: '5.0.0',
+      queueKey: 'sapa_v5_offline_queue',
+      mutePrefix: 'sapa_v5_mute_',
+      pendingShareKey: 'sapa_v5_pending_share',
+      deliveredPrefix: 'sapa_v5_delivered_',
+      maxPins: 5
+    };
+
+    state.v5DeliveryReceipts = new Map();
+    state.v5PinnedMessages = [];
+    state.v5MentionOpen = false;
+    state.v5OfflineFlushing = false;
+    state.v5ExpireTimer = null;
+
+    function v5Json(value, fallback) {
+      try { return JSON.parse(value); } catch (_) { return fallback; }
+    }
+
+    function v5ChatKey(chatId = state.activeRoomId, kind = state.activeChatType, storage = state.activeDirectStorage) {
+      if (!chatId) return '';
+      return `${kind || 'room'}:${storage || ''}:${chatId}`;
+    }
+
+    function v5MuteStorageKey(chatId = state.activeRoomId, kind = state.activeChatType, storage = state.activeDirectStorage) {
+      return `${SAPA_V5.mutePrefix}${state.user?.uid || 'guest'}_${v5ChatKey(chatId, kind, storage)}`;
+    }
+
+    function getMuteUntilV5(chatId = state.activeRoomId, kind = state.activeChatType, storage = state.activeDirectStorage) {
+      return Number(localStorage.getItem(v5MuteStorageKey(chatId, kind, storage)) || 0);
+    }
+
+    function isChatMutedV5(chatId = state.activeRoomId, kind = state.activeChatType, storage = state.activeDirectStorage) {
+      const until = getMuteUntilV5(chatId, kind, storage);
+      return until === -1 || until > Date.now();
+    }
+
+    function muteLabelV5(until) {
+      if (Number(until) === -1) return 'Selamanya';
+      const diff = Number(until || 0) - Date.now();
+      if (diff <= 0) return 'Tidak dibisukan';
+      const h = Math.ceil(diff / 3600000);
+      if (h <= 24) return `${h} jam lagi`;
+      return `${Math.ceil(h/24)} hari lagi`;
+    }
+
+    function injectSapaV5Style() {
+      if ($('sapa-v5-style')) return;
+      const style = document.createElement('style');
+      style.id = 'sapa-v5-style';
+      style.textContent = `
+        .v5-modal-card{background:rgba(255,255,255,.97);border:1px solid rgba(226,232,240,.9);box-shadow:0 24px 70px rgba(2,6,23,.30)}
+        .dark .v5-modal-card{background:rgba(17,24,39,.98);border-color:rgba(71,85,105,.8)}
+        .v5-tools-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.55rem}
+        .v5-tool{min-height:4.7rem;border-radius:1.15rem;padding:.6rem;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.35rem;font-size:.68rem;font-weight:900;background:rgba(241,245,249,.9);border:1px solid rgba(226,232,240,.8)}
+        .dark .v5-tool{background:rgba(30,41,59,.82);border-color:rgba(71,85,105,.7)}
+        .v5-tool i{font-size:1.15rem;color:#14b8a6}
+        .v5-section{font-size:.66rem;font-weight:1000;letter-spacing:.06em;color:#94a3b8;margin:.85rem .2rem .4rem;text-transform:uppercase}
+        .v5-list-card{display:flex;gap:.7rem;align-items:center;width:100%;padding:.75rem;border-radius:1rem;background:rgba(248,250,252,.82);border:1px solid rgba(226,232,240,.75);text-align:left}
+        .dark .v5-list-card{background:rgba(15,23,42,.62);border-color:rgba(71,85,105,.72)}
+        .v5-media-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.45rem}
+        .v5-media-item{aspect-ratio:1/1;border-radius:.85rem;overflow:hidden;background:#0f172a;position:relative}
+        .v5-media-item img,.v5-media-item video{width:100%;height:100%;object-fit:cover}
+        .v5-link-item{display:block;padding:.75rem;border-radius:1rem;background:rgba(241,245,249,.85);font-size:.76rem;font-weight:800;word-break:break-all}
+        .dark .v5-link-item{background:rgba(30,41,59,.75)}
+        .v5-queue-badge{display:inline-flex;min-width:1.25rem;height:1.25rem;border-radius:999px;background:#f59e0b;color:#111827;align-items:center;justify-content:center;font-size:.62rem;font-weight:1000;padding:0 .3rem}
+        .v5-offline-bubble{opacity:.78;border:1px dashed rgba(245,158,11,.75)!important}
+        .v5-poll{min-width:240px;max-width:300px}
+        .v5-poll-option{width:100%;text-align:left;padding:.55rem .65rem;border-radius:.8rem;background:rgba(255,255,255,.13);margin-top:.38rem;font-size:.78rem;font-weight:800;display:flex;gap:.45rem;align-items:center}
+        .from-them .v5-poll-option{background:rgba(20,184,166,.12)}
+        .v5-poll-bar{height:.24rem;background:rgba(255,255,255,.22);border-radius:999px;margin-top:.28rem;overflow:hidden}
+        .v5-poll-fill{height:100%;background:currentColor;border-radius:999px;opacity:.65}
+        #v5-mention-box{position:absolute;left:.7rem;right:.7rem;bottom:4.8rem;max-height:13rem;overflow:auto;border-radius:1rem;padding:.35rem;background:rgba(255,255,255,.97);border:1px solid rgba(226,232,240,.9);box-shadow:0 18px 45px rgba(2,6,23,.2);z-index:70}
+        .dark #v5-mention-box{background:rgba(17,24,39,.98);border-color:rgba(71,85,105,.8)}
+        .v5-mention-row{width:100%;padding:.6rem .7rem;border-radius:.75rem;display:flex;align-items:center;gap:.55rem;text-align:left;font-size:.78rem;font-weight:900}
+        .v5-mention-row:hover{background:rgba(20,184,166,.12)}
+        .v5-pin-strip{display:flex;align-items:center;gap:.5rem;min-width:0;width:100%}
+        .v5-expired{font-style:italic;opacity:.7}
+        .v5-status-sent{opacity:.8}.v5-status-delivered{color:#dbeafe}.v5-status-read{color:#bfdbfe;font-weight:1000}
+        .dark .v5-status-read{color:#7dd3fc}
+        .v5-unread-dot{min-width:1.35rem;height:1.35rem;padding:0 .35rem;border-radius:999px;background:#14b8a6;color:white;display:inline-flex;align-items:center;justify-content:center;font-size:.66rem;font-weight:1000}
+        .v5-muted-mark{font-size:.68rem;color:#94a3b8}
+        .v5-forward-check{width:1.15rem;height:1.15rem;accent-color:#14b8a6}
+      `;
+      document.head.appendChild(style);
+    }
+
+    function ensureSapaV5UI() {
+      injectSapaV5Style();
+      const root = document.querySelector('.w-full.max-w-md.h-full.relative');
+      if (!root) return;
+
+      const chatHeader = $('screen-chat')?.querySelector('.px-4.py-3.relative.z-10 .flex.items-center');
+      if (chatHeader && !$('chat-v5-tools-btn')) {
+        const btn = document.createElement('button');
+        btn.id = 'chat-v5-tools-btn';
+        btn.className = 'chat-header-action ml-2';
+        btn.title = 'Menu chat';
+        btn.innerHTML = '<i class="fas fa-ellipsis-vertical"></i>';
+        btn.onclick = () => window.openChatToolsV5();
+        chatHeader.appendChild(btn);
+      }
+
+      const composer = document.querySelector('#screen-chat .chat-composer');
+      if (composer && !$('v5-mention-box')) {
+        const box = document.createElement('div');
+        box.id = 'v5-mention-box';
+        box.className = 'hidden';
+        composer.appendChild(box);
+      }
+
+      if (!$('modal-v5-chat-tools')) {
+        const modal = document.createElement('div');
+        modal.id = 'modal-v5-chat-tools';
+        modal.className = 'hidden absolute inset-0 z-[125] items-end justify-center p-4 bg-black/55 backdrop-blur-sm';
+        modal.innerHTML = `<div class="v5-modal-card rounded-3xl w-full max-w-sm p-4 animate-popup max-h-[86vh] overflow-y-auto">
+          <div class="w-12 h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full mx-auto mb-4"></div>
+          <div class="flex items-start justify-between gap-3"><div><h2 class="text-xl font-black">Menu Percakapan</h2><p id="v5-chat-tools-subtitle" class="text-xs text-gray-500 dark:text-gray-400 mt-1">Pengaturan chat</p></div><button onclick="window.closeChatToolsV5()" class="w-9 h-9 rounded-full bg-gray-100 dark:bg-gray-700"><i class="fas fa-times"></i></button></div>
+          <p class="v5-section">Pesan</p>
+          <div class="v5-tools-grid">
+            <button class="v5-tool" onclick="window.openChatSearchV4?.();window.closeChatToolsV5()"><i class="fas fa-magnifying-glass"></i><span>Cari</span></button>
+            <button class="v5-tool" onclick="window.openSharedContentV5()"><i class="fas fa-photo-film"></i><span>Media</span></button>
+            <button class="v5-tool" onclick="window.openPinsV5()"><i class="fas fa-thumbtack"></i><span>Pin</span></button>
+            <button class="v5-tool" onclick="window.openStarsV4?.();window.closeChatToolsV5()"><i class="fas fa-star"></i><span>Tersimpan</span></button>
+            <button class="v5-tool" onclick="window.openOfflineQueueV5()"><i class="fas fa-cloud-arrow-up"></i><span>Antrean <span id="v5-queue-count" class="v5-queue-badge hidden">0</span></span></button>
+            <button class="v5-tool" onclick="window.openPollCreateV5()"><i class="fas fa-square-poll-vertical"></i><span>Polling</span></button>
+          </div>
+          <p class="v5-section">Notifikasi & Privasi</p>
+          <div class="space-y-2">
+            <button class="v5-list-card" onclick="window.openMuteV5()"><span class="w-10 h-10 rounded-xl bg-amber-100 text-amber-600 flex items-center justify-center"><i class="fas fa-bell-slash"></i></span><span class="flex-1 min-w-0"><span class="block font-black">Bisukan Notifikasi</span><span id="v5-mute-summary" class="block text-xs text-gray-500 dark:text-gray-400">Tidak dibisukan</span></span><i class="fas fa-chevron-right text-gray-400 text-xs"></i></button>
+            <button class="v5-list-card" onclick="window.openDisappearV5()"><span class="w-10 h-10 rounded-xl bg-purple-100 text-purple-600 flex items-center justify-center"><i class="fas fa-hourglass-half"></i></span><span class="flex-1 min-w-0"><span class="block font-black">Pesan Sementara</span><span id="v5-disappear-summary" class="block text-xs text-gray-500 dark:text-gray-400">Mati</span></span><i class="fas fa-chevron-right text-gray-400 text-xs"></i></button>
+          </div>
+        </div>`;
+        root.appendChild(modal);
+      }
+
+      if (!$('modal-v5-mute')) {
+        const modal = document.createElement('div');
+        modal.id = 'modal-v5-mute';
+        modal.className = 'hidden absolute inset-0 z-[128] items-center justify-center p-5 bg-black/60 backdrop-blur-sm';
+        modal.innerHTML = `<div class="v5-modal-card rounded-3xl w-full max-w-sm p-5 animate-popup"><div class="flex justify-between items-center"><h2 class="text-xl font-black">Bisukan Notifikasi</h2><button onclick="window.closeMuteV5()" class="w-9 h-9 rounded-full bg-gray-100 dark:bg-gray-700"><i class="fas fa-times"></i></button></div><p class="text-sm text-gray-500 dark:text-gray-400 mt-1 mb-4">Pesan tetap masuk, tetapi notifikasi chat ini tidak berbunyi.</p><div class="space-y-2"><button class="v5-list-card" onclick="window.setMuteV5(0)">Aktifkan notifikasi</button><button class="v5-list-card" onclick="window.setMuteV5(8*60*60*1000)">Bisukan 8 jam</button><button class="v5-list-card" onclick="window.setMuteV5(7*24*60*60*1000)">Bisukan 1 minggu</button><button class="v5-list-card" onclick="window.setMuteV5(-1)">Bisukan selamanya</button></div></div>`;
+        root.appendChild(modal);
+      }
+
+      if (!$('modal-v5-disappear')) {
+        const modal = document.createElement('div');
+        modal.id = 'modal-v5-disappear';
+        modal.className = 'hidden absolute inset-0 z-[128] items-center justify-center p-5 bg-black/60 backdrop-blur-sm';
+        modal.innerHTML = `<div class="v5-modal-card rounded-3xl w-full max-w-sm p-5 animate-popup"><div class="flex justify-between items-center"><h2 class="text-xl font-black">Pesan Sementara</h2><button onclick="window.closeDisappearV5()" class="w-9 h-9 rounded-full bg-gray-100 dark:bg-gray-700"><i class="fas fa-times"></i></button></div><p class="text-sm text-gray-500 dark:text-gray-400 mt-1 mb-4">Pesan baru diberi waktu kedaluwarsa. Media tetap mengikuti penyimpanan Firestore-inline.</p><div class="space-y-2"><button class="v5-list-card" onclick="window.setDisappearingV5(0)">Mati</button><button class="v5-list-card" onclick="window.setDisappearingV5(24*60*60)">24 jam</button><button class="v5-list-card" onclick="window.setDisappearingV5(7*24*60*60)">7 hari</button><button class="v5-list-card" onclick="window.setDisappearingV5(90*24*60*60)">90 hari</button></div></div>`;
+        root.appendChild(modal);
+      }
+
+      if (!$('modal-v5-shared')) {
+        const modal = document.createElement('div');
+        modal.id = 'modal-v5-shared';
+        modal.className = 'hidden absolute inset-0 z-[129] items-center justify-center p-4 bg-black/60 backdrop-blur-sm';
+        modal.innerHTML = `<div class="v5-modal-card rounded-3xl w-full max-w-sm p-4 max-h-[88vh] overflow-hidden flex flex-col animate-popup"><div class="flex items-center justify-between mb-3"><div><h2 class="text-xl font-black">Media, File & Link</h2><p id="v5-shared-count" class="text-xs text-gray-500 dark:text-gray-400">Pesan yang sedang dimuat</p></div><button onclick="window.closeSharedContentV5()" class="w-9 h-9 rounded-full bg-gray-100 dark:bg-gray-700"><i class="fas fa-times"></i></button></div><div class="flex gap-2 mb-3"><button class="sticker-tab active" data-v5-shared-tab="media" onclick="window.switchSharedTabV5('media')">Media</button><button class="sticker-tab" data-v5-shared-tab="files" onclick="window.switchSharedTabV5('files')">File</button><button class="sticker-tab" data-v5-shared-tab="links" onclick="window.switchSharedTabV5('links')">Link</button></div><div id="v5-shared-body" class="flex-1 overflow-y-auto pb-2"></div></div>`;
+        root.appendChild(modal);
+      }
+
+      if (!$('modal-v5-queue')) {
+        const modal = document.createElement('div');
+        modal.id = 'modal-v5-queue';
+        modal.className = 'hidden absolute inset-0 z-[129] items-center justify-center p-4 bg-black/60 backdrop-blur-sm';
+        modal.innerHTML = `<div class="v5-modal-card rounded-3xl w-full max-w-sm p-4 max-h-[86vh] overflow-hidden flex flex-col animate-popup"><div class="flex items-center justify-between mb-3"><div><h2 class="text-xl font-black">Antrean Pesan</h2><p class="text-xs text-gray-500 dark:text-gray-400">Pesan offline dikirim otomatis saat koneksi kembali.</p></div><button onclick="window.closeOfflineQueueV5()" class="w-9 h-9 rounded-full bg-gray-100 dark:bg-gray-700"><i class="fas fa-times"></i></button></div><div id="v5-queue-list" class="flex-1 overflow-y-auto space-y-2"></div><button onclick="window.flushOfflineQueueV5(true)" class="mt-3 w-full rounded-2xl bg-sapa-light text-white py-3 font-black"><i class="fas fa-rotate mr-2"></i>Coba Kirim Sekarang</button></div>`;
+        root.appendChild(modal);
+      }
+
+      if (!$('modal-v5-pins')) {
+        const modal = document.createElement('div');
+        modal.id = 'modal-v5-pins';
+        modal.className = 'hidden absolute inset-0 z-[129] items-center justify-center p-4 bg-black/60 backdrop-blur-sm';
+        modal.innerHTML = `<div class="v5-modal-card rounded-3xl w-full max-w-sm p-4 max-h-[86vh] overflow-hidden flex flex-col animate-popup"><div class="flex items-center justify-between mb-3"><div><h2 class="text-xl font-black">Pesan Dipin</h2><p class="text-xs text-gray-500 dark:text-gray-400">Maksimal ${SAPA_V5.maxPins} pin per grup.</p></div><button onclick="window.closePinsV5()" class="w-9 h-9 rounded-full bg-gray-100 dark:bg-gray-700"><i class="fas fa-times"></i></button></div><div id="v5-pins-list" class="flex-1 overflow-y-auto space-y-2"></div></div>`;
+        root.appendChild(modal);
+      }
+
+      if (!$('modal-v5-poll')) {
+        const modal = document.createElement('div');
+        modal.id = 'modal-v5-poll';
+        modal.className = 'hidden absolute inset-0 z-[130] items-center justify-center p-5 bg-black/60 backdrop-blur-sm';
+        modal.innerHTML = `<div class="v5-modal-card rounded-3xl w-full max-w-sm p-5 animate-popup"><div class="flex items-center justify-between"><h2 class="text-xl font-black">Buat Polling</h2><button onclick="window.closePollCreateV5()" class="w-9 h-9 rounded-full bg-gray-100 dark:bg-gray-700"><i class="fas fa-times"></i></button></div><input id="v5-poll-question" maxlength="180" placeholder="Pertanyaan polling" class="w-full mt-4 rounded-2xl bg-gray-100 dark:bg-gray-900/60 border border-gray-200 dark:border-gray-700 px-4 py-3 font-bold focus:outline-none focus:border-sapa-light"><div id="v5-poll-options" class="space-y-2 mt-3"></div><button onclick="window.addPollOptionV5()" class="w-full mt-2 rounded-xl bg-gray-100 dark:bg-gray-700 py-2.5 text-xs font-black"><i class="fas fa-plus mr-1"></i>Tambah opsi</button><button id="v5-poll-send" onclick="window.sendPollV5()" class="w-full mt-4 rounded-2xl bg-sapa-light text-white py-3.5 font-black shadow-3d">Kirim Polling</button></div>`;
+        root.appendChild(modal);
+      }
+
+      if (!$('modal-v5-profile-share')) {
+        const modal = document.createElement('div');
+        modal.id = 'modal-v5-profile-share';
+        modal.className = 'hidden absolute inset-0 z-[132] items-center justify-center p-5 bg-black/60 backdrop-blur-sm';
+        modal.innerHTML = `<div class="v5-modal-card rounded-3xl w-full max-w-sm p-5 text-center animate-popup"><button onclick="window.closeProfileShareV5()" class="absolute mt-0 right-9 w-9 h-9 rounded-full bg-gray-100 dark:bg-gray-700"><i class="fas fa-times"></i></button><h2 class="text-xl font-black">Bagikan Profil Sapa</h2><p id="v5-share-username" class="text-sm text-sapa-dark dark:text-teal-300 font-black mt-1"></p><div id="v5-profile-qr" class="w-48 h-48 mx-auto my-5 bg-white rounded-2xl p-3 flex items-center justify-center"></div><p id="v5-profile-link" class="text-xs text-gray-500 dark:text-gray-400 break-all"></p><div class="grid grid-cols-2 gap-2 mt-4"><button onclick="window.copyProfileLinkV5()" class="rounded-2xl bg-gray-100 dark:bg-gray-700 py-3 font-black text-sm"><i class="fas fa-copy mr-1"></i>Salin Link</button><button onclick="window.nativeShareProfileV5()" class="rounded-2xl bg-sapa-light text-white py-3 font-black text-sm"><i class="fas fa-share-nodes mr-1"></i>Bagikan</button></div></div>`;
+        root.appendChild(modal);
+      }
+
+      const attachmentGrid = $('attachment-menu')?.querySelector('.grid');
+      if (attachmentGrid && !$('v5-poll-attach-btn')) {
+        const btn = document.createElement('button');
+        btn.id = 'v5-poll-attach-btn';
+        btn.className = 'flex flex-col items-center gap-2 group';
+        btn.innerHTML = '<div class="w-14 h-14 rounded-full bg-gradient-to-tr from-emerald-500 to-teal-400 text-white flex items-center justify-center text-xl shadow-lg active:scale-90"><i class="fas fa-square-poll-vertical"></i></div><span class="text-[11px] font-semibold text-gray-600 dark:text-gray-300">Polling</span>';
+        btn.onclick = () => { window.toggleAttachmentMenu?.(); window.openPollCreateV5(); };
+        attachmentGrid.appendChild(btn);
+      }
+      if (attachmentGrid && !$('v5-contact-attach-btn')) {
+        const btn = document.createElement('button');
+        btn.id = 'v5-contact-attach-btn';
+        btn.className = 'flex flex-col items-center gap-2 group';
+        btn.innerHTML = '<div class="w-14 h-14 rounded-full bg-gradient-to-tr from-sky-500 to-blue-500 text-white flex items-center justify-center text-xl shadow-lg active:scale-90"><i class="fas fa-address-card"></i></div><span class="text-[11px] font-semibold text-gray-600 dark:text-gray-300">Kontak</span>';
+        btn.onclick = () => { window.toggleAttachmentMenu?.(); window.openContactShareV5(); };
+        attachmentGrid.appendChild(btn);
+      }
+
+      if (!$('modal-v5-contact-share')) {
+        const modal = document.createElement('div');
+        modal.id = 'modal-v5-contact-share';
+        modal.className = 'hidden absolute inset-0 z-[130] items-center justify-center p-4 bg-black/60 backdrop-blur-sm';
+        modal.innerHTML = `<div class="v5-modal-card rounded-3xl w-full max-w-sm p-4 max-h-[86vh] overflow-hidden flex flex-col animate-popup"><div class="flex items-center justify-between mb-3"><div><h2 class="text-xl font-black">Bagikan Kontak</h2><p class="text-xs text-gray-500 dark:text-gray-400">Kirim kartu kontak Sapa ke percakapan.</p></div><button onclick="window.closeContactShareV5()" class="w-9 h-9 rounded-full bg-gray-100 dark:bg-gray-700"><i class="fas fa-times"></i></button></div><div id="v5-contact-share-list" class="flex-1 overflow-y-auto space-y-2"></div></div>`;
+        root.appendChild(modal);
+      }
+
+      const profileCard = $('profile-name')?.closest('.settings-card');
+      if (profileCard && !$('v5-share-profile-btn')) {
+        const btn = document.createElement('button');
+        btn.id = 'v5-share-profile-btn';
+        btn.className = 'mt-2 ml-2 px-4 py-2 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-300 text-xs font-black';
+        btn.innerHTML = '<i class="fas fa-qrcode mr-1"></i>Bagikan profil';
+        btn.onclick = () => window.openProfileShareV5();
+        $('profile-username')?.insertAdjacentElement('afterend', btn);
+      }
+      updateChatToolsSummaryV5();
+      updateQueueBadgeV5();
+    }
+
+    function getOfflineQueueV5() {
+      return v5Json(localStorage.getItem(`${SAPA_V5.queueKey}_${state.user?.uid || 'guest'}`) || '[]', []);
+    }
+    function saveOfflineQueueV5(queue) {
+      localStorage.setItem(`${SAPA_V5.queueKey}_${state.user?.uid || 'guest'}`, JSON.stringify((queue || []).slice(-100)));
+      updateQueueBadgeV5();
+    }
+    function updateQueueBadgeV5() {
+      const count = getOfflineQueueV5().length;
+      const badge = $('v5-queue-count');
+      if (badge) { badge.textContent = String(count); badge.classList.toggle('hidden', !count); }
+    }
+
+    function captureQueueContextV5(payload) {
+      return {
+        id: `q_${Date.now()}_${Math.random().toString(36).slice(2,8)}`,
+        createdAtMs: Date.now(),
+        chatId: state.activeRoomId,
+        chatType: state.activeChatType || 'room',
+        storage: state.activeDirectStorage || 'directChats',
+        chatName: state.activeRoomName || '',
+        otherUid: state.activeRoomData?.otherUid || '',
+        memberIds: Object.keys(state.activeRoomData?.memberIds || {}),
+        payload,
+        status: 'pending',
+        error: ''
+      };
+    }
+
+    function enqueueOfflineV5(payload) {
+      const queue = getOfflineQueueV5();
+      const item = captureQueueContextV5(payload);
+      queue.push(item);
+      saveOfflineQueueV5(queue);
+      return item;
+    }
+
+    async function sendQueueItemV5(item) {
+      if (!state.user || !item?.chatId) throw new Error('Akun atau tujuan chat tidak valid.');
+      const p = item.payload || {};
+      const collectionRef = item.chatType === 'direct'
+        ? collection(db, item.storage === 'rooms' ? 'rooms' : 'directChats', item.chatId, 'messages')
+        : collection(db, 'rooms', item.chatId, 'messages');
+      const seconds = Number(p.disappearingSeconds || 0);
+      await addDoc(collectionRef, {
+        type: p.type || 'text', text: p.text || '', fileURL: p.fileURL || '', fileName: p.fileName || '', storageMode:p.storageMode || '', stickerKind:p.stickerKind || '', stickerValue:p.stickerValue || '', stickerName:p.stickerName || '', audioURL:p.audioURL || '', audioMimeType:p.audioMimeType || '', audioDuration:p.audioDuration || 0,
+        replyToId:p.replyToId || '', replyToSenderName:p.replyToSenderName || '', replyToPreview:p.replyToPreview || '', replyToType:p.replyToType || '', forwardedFromSenderName:p.forwardedFromSenderName || '', mentions:p.mentions || [],
+        pollQuestion:p.pollQuestion || '', pollOptions:Array.isArray(p.pollOptions) ? p.pollOptions : [],
+        contactUid:p.contactUid || '', contactName:p.contactName || '', contactUsername:p.contactUsername || '', contactPhotoURL:p.contactPhotoURL || '',
+        senderUid:state.user.uid, senderName:getSenderName(), senderPhotoURL:state.profile?.photoURL || state.user.photoURL || '', isDeleted:false, editedAt:null,
+        expiresAtMs: seconds > 0 ? Date.now() + seconds*1000 : 0,
+        queuedFromOffline:true, createdAt:serverTimestamp()
+      });
+      const chatRef = item.chatType === 'direct' ? doc(db, item.storage === 'rooms' ? 'rooms' : 'directChats', item.chatId) : doc(db, 'rooms', item.chatId);
+      const meta = { lastMessage:p.lastMessage || p.text || 'Pesan baru', lastSenderUid:state.user.uid, lastSenderName:getSenderName(), updatedAt:serverTimestamp() };
+      if (item.chatType === 'direct' && item.otherUid) {
+        meta[`unreadCount.${item.otherUid}`] = increment(1); meta[`unreadCount.${state.user.uid}`] = 0;
+      } else if (item.chatType === 'room') {
+        (item.memberIds || []).filter(uid => uid && uid !== state.user.uid).forEach(uid => { meta[`unreadCount.${uid}`] = increment(1); });
+        meta[`unreadCount.${state.user.uid}`] = 0;
+      }
+      try { await updateDoc(chatRef, meta); } catch (error) { console.warn('Queue metadata update gagal:', error); }
+    }
+
+    window.flushOfflineQueueV5 = async function(force = false) {
+      if (!navigator.onLine || state.v5OfflineFlushing || !state.user) {
+        if (force && !navigator.onLine) showV4Toast?.('Masih offline.', 'danger');
+        return;
+      }
+      const queue = getOfflineQueueV5();
+      if (!queue.length) { if (force) showV4Toast?.('Antrean kosong.'); return; }
+      state.v5OfflineFlushing = true;
+      const remaining = [];
+      let sent = 0;
+      for (const item of queue) {
+        try { await sendQueueItemV5(item); sent++; }
+        catch (error) { remaining.push({ ...item, status:'failed', error:String(error?.message || error) }); }
+      }
+      saveOfflineQueueV5(remaining);
+      state.v5OfflineFlushing = false;
+      renderOfflineQueueV5();
+      if (sent) showV4Toast?.(`${sent} pesan antrean berhasil dikirim ✓`);
+      if (remaining.length && force) showV4Toast?.(`${remaining.length} pesan masih gagal dikirim.`, 'danger');
+    };
+
+    function renderOfflineQueueV5() {
+      const box = $('v5-queue-list'); if (!box) return;
+      const q = getOfflineQueueV5();
+      if (!q.length) { box.innerHTML = '<div class="p-7 text-center text-gray-400"><i class="fas fa-cloud-arrow-up text-4xl mb-3 opacity-50"></i><p class="font-black">Antrean kosong</p></div>'; return; }
+      box.innerHTML = q.map(item => `<div class="v5-list-card"><span class="w-10 h-10 rounded-xl ${item.status==='failed'?'bg-red-100 text-red-500':'bg-amber-100 text-amber-600'} flex items-center justify-center"><i class="fas ${item.status==='failed'?'fa-triangle-exclamation':'fa-clock'}"></i></span><span class="flex-1 min-w-0"><span class="block text-xs font-black truncate">${escapeHTML(item.chatName || item.chatId)}</span><span class="block text-sm font-bold truncate">${escapeHTML(item.payload?.text || item.payload?.lastMessage || 'Pesan')}</span>${item.error ? `<span class="block text-[10px] text-red-500 truncate">${escapeHTML(item.error)}</span>`:''}</span><button onclick="window.removeQueueItemV5('${escapeHTML(item.id)}')" class="w-9 h-9 rounded-xl bg-red-50 text-red-500"><i class="fas fa-trash text-xs"></i></button></div>`).join('');
+    }
+    window.openOfflineQueueV5 = function(){ ensureSapaV5UI(); window.closeChatToolsV5(); renderOfflineQueueV5(); $('modal-v5-queue')?.classList.replace('hidden','flex'); };
+    window.closeOfflineQueueV5 = function(){ $('modal-v5-queue')?.classList.replace('flex','hidden'); };
+    window.removeQueueItemV5 = function(id){ saveOfflineQueueV5(getOfflineQueueV5().filter(x=>x.id!==id)); renderOfflineQueueV5(); };
+
+    // Real delivered receipts: receiver client acknowledges message arrival separately from read.
+    async function markMessagesDeliveredV5(messageDocs) {
+      if (!state.user || !state.activeRoomId) return;
+      const incoming = (messageDocs || []).filter(({data}) => data && !['message_action','room_action','call_signal'].includes(data.type) && data.senderUid && data.senderUid !== state.user.uid && !data.isDeleted).slice(-35);
+      for (const item of incoming) {
+        const key = `${SAPA_V5.deliveredPrefix}${state.user.uid}_${state.activeRoomId}_${item.id}`;
+        if (localStorage.getItem(key)) continue;
+        localStorage.setItem(key, '1');
+        addMessageAction('delivered', item.id).catch(()=>localStorage.removeItem(key));
+      }
+    }
+
+    const originalApplyMessageActionsV5 = applyMessageActions;
+    applyMessageActions = function(messageDocs) {
+      const actionMap = originalApplyMessageActionsV5(messageDocs);
+      const delivered = new Map();
+      const votes = new Map();
+      (messageDocs || []).forEach(({data}) => {
+        if (data?.type !== 'message_action' || !data.targetMessageId || !data.senderUid) return;
+        if (data.action === 'delivered') {
+          const set = delivered.get(data.targetMessageId) || new Set(); set.add(data.senderUid); delivered.set(data.targetMessageId, set);
+        }
+        if (data.action === 'poll_vote' && Number.isInteger(Number(data.optionIndex))) {
+          const perUser = votes.get(data.targetMessageId) || new Map();
+          perUser.set(data.senderUid, Number(data.optionIndex));
+          votes.set(data.targetMessageId, perUser);
+        }
+      });
+      state.v5DeliveryReceipts = delivered;
+      votes.forEach((perUser, targetId) => {
+        const current = actionMap.get(targetId) || {};
+        const counts = {};
+        perUser.forEach(index => { counts[index] = (counts[index] || 0) + 1; });
+        actionMap.set(targetId, { ...current, pollVotes:counts, pollVotesByUser:Object.fromEntries(perUser) });
+      });
+      return actionMap;
+    };
+
+    const originalMarkVisibleMessagesReadV5 = markVisibleMessagesRead;
+    markVisibleMessagesRead = async function(messageDocs) {
+      await markMessagesDeliveredV5(messageDocs);
+      if (document.hidden || document.visibilityState !== 'visible') return;
+      return originalMarkVisibleMessagesReadV5(messageDocs);
+    };
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && state.activeRoomId && state.messageCache?.size) {
+        const docs = Array.from(state.messageCache.entries()).map(([id,data]) => ({id,data}));
+        markVisibleMessagesRead(docs).catch(()=>{});
+      }
+    });
+
+    // Generic create-only action supporting delivered + poll vote while preserving existing actions.
+    addMessageAction = async function(action, targetMessageId, extra = {}) {
+      if (!state.user || !state.activeRoomId || !targetMessageId) throw new Error('Percakapan atau pesan tidak valid.');
+      await addDoc(activeMessagesCollection(), {
+        type:'message_action', action, targetMessageId,
+        newText:extra.newText || '', emoji:extra.emoji || '', optionIndex:Number.isInteger(Number(extra.optionIndex)) ? Number(extra.optionIndex) : null,
+        readerUid:action==='read' ? state.user.uid : '', deliveredUid:action==='delivered' ? state.user.uid : '',
+        text:action==='delete' ? 'PESAN INI TELAH DI HAPUS' : (extra.newText || ''),
+        senderUid:state.user.uid, senderName:getSenderName(), senderPhotoURL:state.profile?.photoURL || state.user.photoURL || '', createdAt:serverTimestamp()
+      });
+    };
+
+    buildMessageMeta = function(msg, isMe) {
+      const time = formatMessageTime(msg.createdAt);
+      const edited = msg.editedAt && !msg.isDeleted ? '<span class="edited-label">diedit</span>' : '';
+      let status = '';
+      if (isMe && !msg.isDeleted) {
+        const readers = state.readReceipts.get(msg.id) || new Set();
+        const delivered = state.v5DeliveryReceipts.get(msg.id) || new Set();
+        const readCount = Array.from(readers).filter(uid=>uid && uid!==state.user?.uid).length;
+        const deliveredCount = Array.from(delivered).filter(uid=>uid && uid!==state.user?.uid).length;
+        if (readCount > 0) status = `<span class="read-status v5-status-read">✓✓ dibaca${state.activeChatType==='room' ? ` ${readCount}`:''}</span>`;
+        else if (deliveredCount > 0) status = `<span class="read-status v5-status-delivered">✓✓ tersampaikan${state.activeChatType==='room' ? ` ${deliveredCount}`:''}</span>`;
+        else status = '<span class="read-status v5-status-sent">✓ terkirim</span>';
+      }
+      const expiry = Number(msg.expiresAtMs || 0) > Date.now() ? `<span class="edited-label"><i class="fas fa-hourglass-half"></i></span>` : '';
+      if (!time && !edited && !status && !expiry) return '';
+      return `<div class="msg-time ${isMe?'text-right':'text-left'}">${time}${edited}${expiry}${status}</div>`;
+    };
+
+    function pollHtmlV5(msg, isMe) {
+      const options = Array.isArray(msg.pollOptions) ? msg.pollOptions : [];
+      const counts = msg.pollVotes || {};
+      const total = Object.values(counts).reduce((a,b)=>a+Number(b||0),0);
+      const myVote = msg.pollVotesByUser?.[state.user?.uid];
+      const rows = options.map((option,index)=>{
+        const c = Number(counts[index] || 0); const pct = total ? Math.round(c/total*100) : 0;
+        return `<button class="v5-poll-option" onclick="event.stopPropagation();window.votePollV5('${escapeHTML(msg.id || '')}',${index})"><span>${myVote===index?'◉':'○'}</span><span class="flex-1"><span class="block">${escapeHTML(option)}</span><span class="v5-poll-bar"><span class="v5-poll-fill" style="width:${pct}%"></span></span></span><span>${c}</span></button>`;
+      }).join('');
+      return `<div class="message-bubble ${isMe?'from-me':'from-them'} v5-poll"><div class="font-black mb-1"><i class="fas fa-square-poll-vertical mr-1"></i>${escapeHTML(msg.pollQuestion || 'Polling')}</div>${rows}<div class="text-[10px] font-bold opacity-70 mt-2">${total} suara</div>${buildMessageMeta(msg,isMe)}</div>`;
+    }
+
+    const originalGetMessagePreviewV5 = getMessagePreview;
+    getMessagePreview = function(msg) { if (msg?.type === 'poll') return `📊 ${msg.pollQuestion || 'Polling'}`; if (msg?.type === 'contact') return `👤 ${msg.contactName || 'Kontak'}`; return originalGetMessagePreviewV5(msg); };
+
+    const originalRenderMessageContentV5 = renderMessageContent;
+    renderMessageContent = function(msg, isMe) {
+      if (Number(msg?.expiresAtMs || 0) && Number(msg.expiresAtMs) <= Date.now()) {
+        return `<div class="message-bubble ${isMe?'from-me':'from-them'} v5-expired"><i class="fas fa-hourglass-end mr-1"></i>Pesan sementara telah kedaluwarsa${buildMessageMeta({...msg,isDeleted:true},isMe)}</div>`;
+      }
+      if (msg?.type === 'poll') return pollHtmlV5(msg,isMe);
+      if (msg?.type === 'contact') {
+        const side=isMe?'from-me':'from-them';
+        return `<div class="message-bubble ${side}"><div class="flex items-center gap-3 min-w-[220px]"><span class="w-11 h-11 rounded-full bg-white/20 flex items-center justify-center overflow-hidden shrink-0">${msg.contactPhotoURL?`<img src="${escapeHTML(msg.contactPhotoURL)}" class="w-full h-full object-cover">`:'<i class="fas fa-user"></i>'}</span><span class="flex-1 min-w-0"><span class="block font-black truncate">${escapeHTML(msg.contactName||'Kontak Sapa')}</span><span class="block text-[11px] opacity-80 truncate">@${escapeHTML(msg.contactUsername||'tanpa_username')}</span></span></div>${msg.contactUid?`<button onclick="event.stopPropagation();window.openUserProfile('${escapeHTML(msg.contactUid)}')" class="mt-2 w-full rounded-xl bg-white/15 py-2 text-xs font-black">Lihat Profil</button>`:''}${buildMessageMeta(msg,isMe)}</div>`;
+      }
+      return originalRenderMessageContentV5(msg,isMe);
+    };
+
+    window.votePollV5 = async function(messageId, optionIndex) {
+      if (!messageId) return;
+      try { await addMessageAction('poll_vote', messageId, { optionIndex:Number(optionIndex) }); }
+      catch (error) { alert(error.message || 'Gagal mengirim vote.'); }
+    };
+
+    function currentDisappearingSecondsV5() { return Number(state.activeRoomData?.disappearingSeconds || 0); }
+    function disappearingLabelV5(sec) {
+      sec = Number(sec || 0); if (!sec) return 'Mati'; if (sec===86400) return '24 jam'; if (sec===604800) return '7 hari'; if (sec===7776000) return '90 hari'; return `${Math.round(sec/86400)} hari`;
+    }
+
+    // Rebuild sendMessage so new messages can carry expiry and poll data.
+    sendMessage = async function(payload) {
+      if (!state.user || !state.activeRoomId) return;
+      const seconds = Number(payload.disappearingSeconds ?? currentDisappearingSecondsV5());
+      await addDoc(activeMessagesCollection(), {
+        type:payload.type, text:payload.text || '', fileURL:payload.fileURL || '', fileName:payload.fileName || '', storageMode:payload.storageMode || '', stickerKind:payload.stickerKind || '', stickerValue:payload.stickerValue || '', stickerName:payload.stickerName || '', audioURL:payload.audioURL || '', audioMimeType:payload.audioMimeType || '', audioDuration:payload.audioDuration || 0,
+        replyToId:payload.replyToId || '', replyToSenderName:payload.replyToSenderName || '', replyToPreview:payload.replyToPreview || '', replyToType:payload.replyToType || '', forwardedFromSenderName:payload.forwardedFromSenderName || '', mentions:payload.mentions || [],
+        pollQuestion:payload.pollQuestion || '', pollOptions:Array.isArray(payload.pollOptions) ? payload.pollOptions : [],
+        contactUid:payload.contactUid || '', contactName:payload.contactName || '', contactUsername:payload.contactUsername || '', contactPhotoURL:payload.contactPhotoURL || '',
+        senderUid:state.user.uid, senderName:getSenderName(), senderPhotoURL:state.profile?.photoURL || state.user.photoURL || '', isDeleted:false, editedAt:null,
+        expiresAtMs:seconds>0 ? Date.now()+seconds*1000 : 0, createdAt:serverTimestamp()
+      });
+      await updateRoomLastMessageSafe(payload.lastMessage || payload.text || 'Pesan baru');
+    };
+
+    // Group unread parity with direct chats.
+    const originalUpdateRoomLastMessageSafeV5 = updateRoomLastMessageSafe;
+    updateRoomLastMessageSafe = async function(lastMessage) {
+      if (!state.activeRoomId || !state.user) return;
+      if (state.activeChatType === 'direct') return originalUpdateRoomLastMessageSafeV5(lastMessage);
+      try {
+        const payload = { lastMessage, lastSenderUid:state.user.uid, lastSenderName:getSenderName(), updatedAt:serverTimestamp(), [`unreadCount.${state.user.uid}`]:0 };
+        Object.keys(state.activeRoomData?.memberIds || {}).filter(uid=>uid && uid!==state.user.uid && state.activeRoomData?.memberIds?.[uid] !== false).forEach(uid=>{ payload[`unreadCount.${uid}`]=increment(1); });
+        await updateDoc(activeChatDocument(), payload);
+      } catch (error) { console.warn('Metadata group unread gagal:', error); }
+    };
+
+    async function clearGroupUnreadV5(roomId) {
+      if (!state.user || !roomId) return;
+      try { await updateDoc(doc(db,'rooms',roomId), { [`unreadCount.${state.user.uid}`]:0, [`lastOpenedAt.${state.user.uid}`]:serverTimestamp() }); } catch (_) {}
+      const cached = state.roomsCache.get(roomId); if (cached) { cached.unreadCount={...(cached.unreadCount||{}),[state.user.uid]:0}; state.roomsCache.set(roomId,cached); }
+      renderUnifiedChatList?.();
+    }
+
+    const originalOpenChatV5 = window.openChat;
+    window.openChat = async function(code,name) {
+      const r = await originalOpenChatV5(code,name); setTimeout(()=>{ clearGroupUnreadV5(code); ensureSapaV5UI(); updateChatToolsSummaryV5(); restorePendingShareV5(); },180); return r;
+    };
+    const originalOpenDirectChatV5 = window.openDirectChat;
+    window.openDirectChat = async function(chatId,profile=null,storage=null) {
+      const r = await originalOpenDirectChatV5(chatId,profile,storage); setTimeout(()=>{ ensureSapaV5UI(); updateChatToolsSummaryV5(); restorePendingShareV5(); },180); return r;
+    };
+
+    const originalRenderUnifiedChatListV5 = renderUnifiedChatList;
+    renderUnifiedChatList = function() {
+      originalRenderUnifiedChatListV5();
+      const listEl = $('room-list'); if (!listEl) return;
+      let filtered = [];
+      try { filtered = filterChatItemsByFolderV28(state.lastRenderedRooms || []); } catch (_) { filtered = state.lastRenderedRooms || []; }
+      const rows = Array.from(listEl.querySelectorAll('.conversation-row'));
+      rows.forEach((row,i)=>{
+        const item = filtered[i]; if (!item) return;
+        const unread = Number(item.unreadCount?.[state.user?.uid] || 0);
+        const muted = isChatMutedV5(item.id, item.kind, item.kind==='direct'?getDirectStorage(item):'rooms');
+        const side = row.querySelector('.conversation-delete-btn')?.parentElement ? null : null;
+        const time = row.querySelector('.text-[10px].text-gray-400.font-bold');
+        if (time && unread && !row.querySelector('.v5-unread-dot')) time.insertAdjacentHTML('beforebegin', `<span class="v5-unread-dot">${Math.min(unread,99)}</span>`);
+        const title = row.querySelector('h3'); if (title && muted && !title.parentElement.querySelector('.v5-muted-mark')) title.insertAdjacentHTML('afterend','<i class="fas fa-bell-slash v5-muted-mark" title="Notifikasi dibisukan"></i>');
+      });
+      updateSapaAppBadge?.((state.lastRenderedRooms || []).reduce((sum,item)=>sum+Number(item.unreadCount?.[state.user?.uid]||0),0));
+    };
+
+    // Mute local notification layer.
+    const originalShowSapaNotificationV5 = showSapaNotification;
+    showSapaNotification = function(title, body, target, options={}) {
+      if (target?.id && isChatMutedV5(target.id, target.kind || 'room', target.storage || (target.kind==='direct'?'directChats':'rooms'))) return;
+      return originalShowSapaNotificationV5(title,body,target,options);
+    };
+
+    window.openChatToolsV5 = function(){ ensureSapaV5UI(); updateChatToolsSummaryV5(); $('modal-v5-chat-tools')?.classList.replace('hidden','flex'); };
+    window.closeChatToolsV5 = function(){ $('modal-v5-chat-tools')?.classList.replace('flex','hidden'); };
+    window.openMuteV5 = function(){ window.closeChatToolsV5(); $('modal-v5-mute')?.classList.replace('hidden','flex'); };
+    window.closeMuteV5 = function(){ $('modal-v5-mute')?.classList.replace('flex','hidden'); };
+    window.setMuteV5 = function(durationMs){ const val=Number(durationMs)===-1?-1:(Number(durationMs)>0?Date.now()+Number(durationMs):0); if(val) localStorage.setItem(v5MuteStorageKey(),String(val)); else localStorage.removeItem(v5MuteStorageKey()); window.closeMuteV5(); updateChatToolsSummaryV5(); renderUnifiedChatList?.(); showV4Toast?.(val?'Notifikasi chat dibisukan.':'Notifikasi chat diaktifkan.'); };
+
+    window.openDisappearV5 = function(){ window.closeChatToolsV5(); $('modal-v5-disappear')?.classList.replace('hidden','flex'); };
+    window.closeDisappearV5 = function(){ $('modal-v5-disappear')?.classList.replace('flex','hidden'); };
+    window.setDisappearingV5 = async function(seconds){
+      seconds = Number(seconds||0);
+      if (state.activeChatType==='room' && !isCurrentUserRoomAdmin()) return alert('Hanya admin grup yang dapat mengubah pesan sementara.');
+      try { await updateDoc(activeChatDocument(), { disappearingSeconds:seconds, updatedAt:serverTimestamp() }); state.activeRoomData={...(state.activeRoomData||{}),disappearingSeconds:seconds}; window.closeDisappearV5(); updateChatToolsSummaryV5(); showV4Toast?.(`Pesan sementara: ${disappearingLabelV5(seconds)}`); }
+      catch(error){ alert(error.message || 'Gagal menyimpan pengaturan pesan sementara.'); }
+    };
+
+    function updateChatToolsSummaryV5(){
+      const m=$('v5-mute-summary'); if(m) m.textContent=muteLabelV5(getMuteUntilV5());
+      const d=$('v5-disappear-summary'); if(d) d.textContent=disappearingLabelV5(currentDisappearingSecondsV5());
+      const s=$('v5-chat-tools-subtitle'); if(s) s.textContent=`${state.activeChatType==='direct'?'Pesan pribadi':'Grup'} · ${state.activeRoomName || ''}`;
+      updateQueueBadgeV5();
+    }
+
+    // Shared media / documents / links from currently loaded message window.
+    function validVisibleMessagesV5(){ return Array.from(state.messageCache?.entries?.() || []).map(([id,data])=>({id,data})).filter(x=>x.data && !x.data.isDeleted && !['message_action','room_action','call_signal'].includes(x.data.type) && (!Number(x.data.expiresAtMs||0) || Number(x.data.expiresAtMs)>Date.now())); }
+    function extractLinksV5(text){ const m=String(text||'').match(/https?:\/\/[^\s<]+/gi)||[]; return m.map(x=>x.replace(/[),.;]+$/,'')); }
+    window.openSharedContentV5=function(){ ensureSapaV5UI(); window.closeChatToolsV5(); $('modal-v5-shared')?.classList.replace('hidden','flex'); window.switchSharedTabV5('media'); };
+    window.closeSharedContentV5=function(){ $('modal-v5-shared')?.classList.replace('flex','hidden'); };
+    window.switchSharedTabV5=function(tab){
+      document.querySelectorAll('[data-v5-shared-tab]').forEach(b=>b.classList.toggle('active',b.dataset.v5SharedTab===tab));
+      const msgs=validVisibleMessagesV5(); const body=$('v5-shared-body'); if(!body)return;
+      if(tab==='media'){
+        const media=msgs.filter(x=>['image','video'].includes(x.data.type)); $('v5-shared-count').textContent=`${media.length} media pada pesan termuat`;
+        body.innerHTML=media.length?`<div class="v5-media-grid">${media.map(({id,data})=>`<button class="v5-media-item" onclick="window.closeSharedContentV5();setTimeout(()=>scrollToMessage('${escapeHTML(id)}'),80)">${data.type==='video'?`<video src="${escapeHTML(data.fileURL||'')}" muted></video><span class="absolute inset-0 flex items-center justify-center text-white"><i class="fas fa-play"></i></span>`:`<img src="${escapeHTML(data.fileURL||'')}" loading="lazy">`}</button>`).join('')}</div>`:'<div class="p-6 text-center text-gray-400 font-bold">Belum ada media pada pesan termuat.</div>';
+      } else if(tab==='files'){
+        const files=msgs.filter(x=>x.data.type==='document'); $('v5-shared-count').textContent=`${files.length} file pada pesan termuat`;
+        body.innerHTML=files.length?`<div class="space-y-2">${files.map(({id,data})=>`<button class="v5-list-card" onclick="window.closeSharedContentV5();setTimeout(()=>scrollToMessage('${escapeHTML(id)}'),80)"><span class="w-10 h-10 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center"><i class="fas fa-file"></i></span><span class="flex-1 min-w-0"><span class="block font-black truncate">${escapeHTML(data.fileName||'Dokumen')}</span><span class="block text-xs text-gray-500">${escapeHTML(data.senderName||'Pengguna')}</span></span></button>`).join('')}</div>`:'<div class="p-6 text-center text-gray-400 font-bold">Belum ada file pada pesan termuat.</div>';
+      } else {
+        const links=[]; msgs.forEach(({id,data})=>extractLinksV5(data.text).forEach(url=>links.push({id,url,sender:data.senderName||'Pengguna'}))); $('v5-shared-count').textContent=`${links.length} link pada pesan termuat`;
+        body.innerHTML=links.length?`<div class="space-y-2">${links.map(x=>`<a class="v5-link-item" href="${escapeHTML(x.url)}" target="_blank" rel="noopener noreferrer"><span class="block text-sapa-dark dark:text-teal-300">${escapeHTML(x.url)}</span><span class="block text-[10px] text-gray-400 mt-1">${escapeHTML(x.sender)}</span></a>`).join('')}</div>`:'<div class="p-6 text-center text-gray-400 font-bold">Belum ada link pada pesan termuat.</div>';
+      }
+    };
+
+    // Multi-pin using append-only room actions. Old single pins remain readable.
+    const originalApplyRoomActionsV5 = applyRoomActions;
+    applyRoomActions = function(messageDocs){
+      originalApplyRoomActionsV5(messageDocs);
+      const pins = new Map();
+      if(state.pinnedMessage?.targetMessageId) pins.set(state.pinnedMessage.targetMessageId,state.pinnedMessage);
+      (messageDocs||[]).forEach(({data})=>{
+        if(data?.type!=='room_action')return;
+        if((data.action==='pin_multi'||data.action==='pin') && data.pinData?.targetMessageId) pins.set(data.pinData.targetMessageId,data.pinData);
+        if(data.action==='unpin_multi' && data.targetMessageId) pins.delete(data.targetMessageId);
+        if(data.action==='unpin') pins.clear();
+      });
+      state.v5PinnedMessages=Array.from(pins.values()).slice(-SAPA_V5.maxPins);
+      state.pinnedMessage=state.v5PinnedMessages.at(-1)||null;
+      renderPinnedMessageBarV5();
+    };
+
+    function renderPinnedMessageBarV5(){
+      const bar=$('pinned-message-bar'); if(!bar)return; const pins=state.v5PinnedMessages||[];
+      if(!pins.length){bar.classList.remove('active');bar.innerHTML='';return;}
+      const pin=pins[pins.length-1]; bar.classList.add('active');
+      bar.innerHTML=`<div class="v5-pin-strip"><i class="fas fa-thumbtack text-amber-300"></i><button class="flex-1 min-w-0 text-left" onclick="window.openPinsV5()"><p class="text-xs font-black text-amber-200">${pins.length} pesan dipin</p><p class="text-sm font-bold truncate">${escapeHTML(pin.preview||'Pesan')}</p></button><button onclick="window.scrollToMessage('${escapeHTML(pin.targetMessageId)}')" class="w-8 h-8 rounded-full bg-white/10"><i class="fas fa-arrow-down text-xs"></i></button></div>`;
+    }
+    renderPinnedMessageBar = renderPinnedMessageBarV5;
+    window.pinSelectedMessage = async function(){ const s=state.selectedMessage; if(!s||!isCurrentUserRoomAdmin())return alert('Hanya admin yang bisa pin pesan.'); if(state.activeChatType!=='room')return alert('Multi-pin V5 saat ini tersedia untuk grup.'); try{ await addRoomActionSafe(state.activeRoomId,'pin_multi',{targetMessageId:s.id,pinData:{targetMessageId:s.id,senderName:s.data.senderName||'User',preview:getMessagePreview(s.data),pinnedBy:state.user.uid,pinnedAtMs:Date.now()}}); window.closeMessageActions(); }catch(e){alert(e.message||'Gagal pin pesan.');} };
+    window.unpinMessageV5=async function(id){ if(!isCurrentUserRoomAdmin())return; await addRoomActionSafe(state.activeRoomId,'unpin_multi',{targetMessageId:id}); };
+    window.openPinsV5=function(){ ensureSapaV5UI(); window.closeChatToolsV5(); const box=$('v5-pins-list'); const pins=state.v5PinnedMessages||[]; box.innerHTML=pins.length?pins.slice().reverse().map(p=>`<div class="v5-list-card"><button class="flex-1 min-w-0 text-left" onclick="window.closePinsV5();setTimeout(()=>scrollToMessage('${escapeHTML(p.targetMessageId)}'),80)"><span class="block text-xs font-black text-amber-600">${escapeHTML(p.senderName||'Pengguna')}</span><span class="block text-sm font-bold truncate">${escapeHTML(p.preview||'Pesan')}</span></button>${isCurrentUserRoomAdmin()?`<button onclick="window.unpinMessageV5('${escapeHTML(p.targetMessageId)}')" class="w-9 h-9 rounded-xl bg-red-50 text-red-500"><i class="fas fa-times"></i></button>`:''}</div>`).join(''):'<div class="p-6 text-center text-gray-400 font-bold">Belum ada pesan dipin.</div>'; $('modal-v5-pins')?.classList.replace('hidden','flex'); };
+    window.closePinsV5=function(){ $('modal-v5-pins')?.classList.replace('flex','hidden'); };
+
+    // Poll composer.
+    function resetPollOptionsV5(){ const box=$('v5-poll-options'); if(!box)return; box.innerHTML=''; for(let i=0;i<2;i++) window.addPollOptionV5(); }
+    window.addPollOptionV5=function(){ const box=$('v5-poll-options'); if(!box||box.children.length>=8)return; const input=document.createElement('input'); input.maxLength=80; input.placeholder=`Opsi ${box.children.length+1}`; input.className='w-full rounded-2xl bg-gray-100 dark:bg-gray-900/60 border border-gray-200 dark:border-gray-700 px-4 py-3 font-bold focus:outline-none focus:border-sapa-light'; box.appendChild(input); };
+    window.openPollCreateV5=function(){ ensureSapaV5UI(); window.closeChatToolsV5(); $('v5-poll-question').value=''; resetPollOptionsV5(); $('modal-v5-poll')?.classList.replace('hidden','flex'); };
+    window.closePollCreateV5=function(){ $('modal-v5-poll')?.classList.replace('flex','hidden'); };
+    window.sendPollV5=async function(){ const q=$('v5-poll-question')?.value.trim(); const opts=Array.from($('v5-poll-options')?.querySelectorAll('input')||[]).map(x=>x.value.trim()).filter(Boolean); if(!q)return alert('Pertanyaan polling wajib diisi.'); if(opts.length<2)return alert('Minimal dua opsi.'); const btn=$('v5-poll-send'); setButtonLoading(btn,'Mengirim...',true); try{await sendMessage({type:'poll',pollQuestion:q,pollOptions:opts,lastMessage:`📊 ${q}`});window.closePollCreateV5();}catch(e){alert(e.message||'Gagal membuat polling.');}finally{setButtonLoading(btn,'',false);} };
+
+    // Mention autocomplete for groups.
+    function renderMentionSuggestionsV5(){
+      const input=$('message-input'), box=$('v5-mention-box'); if(!input||!box||state.activeChatType!=='room'){box?.classList.add('hidden');return;}
+      const before=input.value.slice(0,input.selectionStart||input.value.length); const m=before.match(/(?:^|\s)@([^\s@]*)$/); if(!m){box.classList.add('hidden');return;}
+      const term=String(m[1]||'').toLowerCase(); const people=(state.activeRoomMembers||[]).filter(x=>x.uid!==state.user?.uid).filter(x=>`${x.displayName||''} ${x.email?.split('@')[0]||''}`.toLowerCase().includes(term)).slice(0,8);
+      if(!people.length){box.classList.add('hidden');return;}
+      box.innerHTML=people.map(p=>`<button class="v5-mention-row" onclick="window.insertMentionV5('${escapeHTML(p.uid)}')"><span class="room-member-avatar-mini">${p.photoURL?`<img src="${escapeHTML(p.photoURL)}">`:escapeHTML((p.displayName||'U').charAt(0))}</span><span>${escapeHTML(p.displayName||p.email||'Pengguna')}</span></button>`).join(''); box.classList.remove('hidden'); state.v5MentionOpen=true;
+    }
+    window.insertMentionV5=function(uid){ const member=(state.activeRoomMembers||[]).find(x=>x.uid===uid); const input=$('message-input'); if(!member||!input)return; const tag='@'+String(member.displayName||member.email?.split('@')[0]||'user').replace(/\s+/g,''); const pos=input.selectionStart||input.value.length; const before=input.value.slice(0,pos).replace(/(?:^|\s)@[^\s@]*$/,m=>(m.startsWith(' ')?' ':'')+tag+' '); input.value=before+input.value.slice(pos); input.focus(); input.setSelectionRange(before.length,before.length); $('v5-mention-box')?.classList.add('hidden'); window.handleMessageInputChange?.(); };
+    const originalHandleMessageInputChangeV5=window.handleMessageInputChange;
+    window.handleMessageInputChange=function(){ const r=originalHandleMessageInputChangeV5?.(); renderMentionSuggestionsV5(); return r; };
+
+    // Multi-chat forward: rooms + direct chats, checkbox selection.
+    window.openForwardMessageModal = function(){
+      if(!state.selectedMessage)return; const list=$('forward-room-list'); if(!list)return; const items=[];
+      state.directChatsCache.forEach((chat,id)=>{if(id!==state.activeRoomId)items.push({kind:'direct',id,data:chat,label:getDirectProfile(chat,getOtherParticipantUid(chat)).displayName||'Pesan Pribadi',storage:getDirectStorage(chat)});});
+      state.roomsCache.forEach((room,id)=>{if(id!==state.activeRoomId && room.memberIds?.[state.user?.uid]!==false)items.push({kind:'room',id,data:room,label:room.roomName||'Room',storage:'rooms'});});
+      list.innerHTML=items.length?items.map(x=>`<label class="v5-list-card cursor-pointer"><input type="checkbox" class="v5-forward-check" data-v5-forward-id="${escapeHTML(x.id)}" data-v5-forward-kind="${x.kind}" data-v5-forward-storage="${escapeHTML(x.storage||'')}"><span class="w-10 h-10 rounded-full bg-sapa-light text-white flex items-center justify-center"><i class="fas ${x.kind==='direct'?'fa-user':'fa-users'}"></i></span><span class="flex-1 font-black truncate">${escapeHTML(x.label)}</span></label>`).join('')+'<button onclick="window.forwardSelectedMultiV5()" class="w-full mt-3 rounded-2xl bg-sapa-light text-white py-3.5 font-black">Forward ke yang dipilih</button>':'<div class="p-4 text-center text-gray-500 font-bold">Belum ada chat tujuan lain.</div>';
+      $('modal-message-actions')?.classList.replace('flex','hidden'); $('modal-forward-message')?.classList.replace('hidden','flex');
+    };
+    window.forwardSelectedMultiV5=async function(){ const selected=state.selectedMessage; if(!selected)return; const targets=Array.from(document.querySelectorAll('.v5-forward-check:checked')).map(el=>({id:el.dataset.v5ForwardId,kind:el.dataset.v5ForwardKind,storage:el.dataset.v5ForwardStorage})); if(!targets.length)return alert('Pilih minimal satu chat tujuan.'); const msg=selected.data; let ok=0,fail=0; for(const t of targets){ try{ const c=t.kind==='direct'?collection(db,t.storage==='rooms'?'rooms':'directChats',t.id,'messages'):collection(db,'rooms',t.id,'messages'); await addDoc(c,{type:msg.type,text:msg.text||'',fileURL:msg.fileURL||'',fileName:msg.fileName||'',storageMode:msg.storageMode||'',stickerKind:msg.stickerKind||'',stickerValue:msg.stickerValue||'',stickerName:msg.stickerName||'',audioURL:msg.audioURL||'',audioMimeType:msg.audioMimeType||'',audioDuration:msg.audioDuration||0,pollQuestion:msg.pollQuestion||'',pollOptions:msg.pollOptions||[],contactUid:msg.contactUid||'',contactName:msg.contactName||'',contactUsername:msg.contactUsername||'',contactPhotoURL:msg.contactPhotoURL||'',forwardedFromSenderName:msg.senderName||'User',senderUid:state.user.uid,senderName:getSenderName(),senderPhotoURL:state.profile?.photoURL||state.user.photoURL||'',isDeleted:false,editedAt:null,createdAt:serverTimestamp()}); const ref=t.kind==='direct'?doc(db,t.storage==='rooms'?'rooms':'directChats',t.id):doc(db,'rooms',t.id); await updateDoc(ref,{lastMessage:`↪ ${getMessagePreview(msg)}`,lastSenderUid:state.user.uid,updatedAt:serverTimestamp()}).catch(()=>{}); ok++; }catch(_){fail++;} } window.closeForwardMessageModal(); showV4Toast?.(`${ok} chat berhasil${fail?`, ${fail} gagal`:''}`); };
+
+    // Offline queue intercept for text messages. Online continues through V4/V5 normal path.
+    const originalSendTextMessageV5=window.sendTextMessage;
+    window.sendTextMessage=async function(){
+      const input=$('message-input'); const text=String(input?.value||'').trim(); if(!text)return originalSendTextMessageV5?.();
+      if(!navigator.onLine){
+        if(state.editingMessageId)return showV4Toast?.('Edit pesan membutuhkan koneksi.', 'danger');
+        const reply=state.replyingMessage; enqueueOfflineV5({type:'text',text,mentions:extractMentions(text),replyToId:reply?.id||'',replyToSenderName:reply?.data?.senderName||'',replyToPreview:reply?getMessagePreview(reply.data):'',replyToType:reply?.data?.type||'',lastMessage:text,disappearingSeconds:currentDisappearingSecondsV5()});
+        if(input)input.value=''; window.cancelReplyMessage?.(); clearCurrentDraftV4?.(); updateMessageCounterV4?.(); showV4Toast?.('Pesan masuk antrean. Akan dikirim otomatis saat online.'); renderOfflineQueuedBubbleV5(text); return;
+      }
+      return originalSendTextMessageV5?.();
+    };
+    function renderOfflineQueuedBubbleV5(text){ const list=$('messages-list'); if(!list)return; const wrap=document.createElement('div'); wrap.className='flex w-full flex-col items-end'; wrap.innerHTML=`<div class="message-bubble from-me v5-offline-bubble">${escapeHTML(text)}<div class="msg-time text-right"><span>⏳ menunggu koneksi</span></div></div>`; list.appendChild(wrap); keepMessagesListAtBottom(list); }
+    window.addEventListener('online',()=>setTimeout(()=>window.flushOfflineQueueV5(false),450));
+
+    // Contact cards, similar to WhatsApp's share-contact flow.
+    window.openContactShareV5 = function() {
+      ensureSapaV5UI();
+      const box = $('v5-contact-share-list');
+      const contacts = Array.from(state.contacts?.values?.() || []).sort((a,b)=>String(a.aliasName||a.displayName||'').localeCompare(String(b.aliasName||b.displayName||'')));
+      if (box) box.innerHTML = contacts.length ? contacts.map(c=>`<button class="v5-list-card" onclick="window.sendContactCardV5('${escapeHTML(c.uid)}')"><span class="w-11 h-11 rounded-full bg-sapa-light text-white flex items-center justify-center overflow-hidden">${c.photoURL?`<img src="${escapeHTML(c.photoURL)}" class="w-full h-full object-cover">`:escapeHTML((c.aliasName||c.displayName||'U').charAt(0))}</span><span class="flex-1 min-w-0"><span class="block font-black truncate">${escapeHTML(c.aliasName||c.displayName||'Pengguna')}</span><span class="block text-xs text-gray-500 truncate">${c.username?'@'+escapeHTML(c.username):escapeHTML(c.email||'Kontak Sapa')}</span></span><i class="fas fa-paper-plane text-sapa-light"></i></button>`).join('') : '<div class="p-7 text-center text-gray-400"><i class="fas fa-address-book text-4xl mb-3 opacity-50"></i><p class="font-black">Belum ada kontak tersimpan</p></div>';
+      $('modal-v5-contact-share')?.classList.replace('hidden','flex');
+    };
+    window.closeContactShareV5 = function(){ $('modal-v5-contact-share')?.classList.replace('flex','hidden'); };
+    window.sendContactCardV5 = async function(uid) {
+      const c = state.contacts?.get?.(uid); if (!c) return;
+      try {
+        await sendMessage({type:'contact', contactUid:uid, contactName:c.aliasName||c.displayName||'Pengguna', contactUsername:c.username||'', contactPhotoURL:c.photoURL||'', lastMessage:`👤 ${c.aliasName||c.displayName||'Kontak'}`});
+        window.closeContactShareV5();
+      } catch (error) { alert(error.message || 'Gagal mengirim kontak.'); }
+    };
+
+    // Sync mute state into service worker so background FCM notifications also respect mute.
+    async function syncMutedChatsToSwV5() {
+      if (!state.user || !('serviceWorker' in navigator)) return;
+      const prefix = `${SAPA_V5.mutePrefix}${state.user.uid}_`;
+      const muted = [];
+      for (let i=0;i<localStorage.length;i++) {
+        const key=localStorage.key(i); if(!key?.startsWith(prefix)) continue;
+        const value=Number(localStorage.getItem(key)||0); if(value!==-1 && value<=Date.now()) { localStorage.removeItem(key); continue; }
+        const raw=key.slice(prefix.length); const first=raw.indexOf(':'); const second=raw.indexOf(':',first+1);
+        if(first<0||second<0) continue;
+        muted.push({kind:raw.slice(0,first),storage:raw.slice(first+1,second),id:raw.slice(second+1),until:value});
+      }
+      try { const reg=await navigator.serviceWorker.ready; (navigator.serviceWorker.controller||reg.active)?.postMessage({type:'SAPA_SYNC_MUTED_V5',muted}); } catch (_) {}
+    }
+
+    const originalSetMuteV5 = window.setMuteV5;
+    window.setMuteV5 = function(durationMs){ originalSetMuteV5(durationMs); setTimeout(syncMutedChatsToSwV5,80); };
+
+    function processPwaShortcutV5() {
+      if (!state.user || state.v5ShortcutProcessed) return;
+      const p = new URLSearchParams(location.search);
+      const tab = p.get('tab'); const openNew = p.get('new') === '1';
+      if (!tab && !openNew) return;
+      state.v5ShortcutProcessed = true;
+      if (['chats','contacts','status','settings','profile'].includes(tab)) window.switchTab(tab);
+      if (openNew) setTimeout(()=>window.showOptionsModal?.(),250);
+      ['source','tab','new'].forEach(k=>p.delete(k));
+      history.replaceState(null,'',location.pathname+(p.toString()?'?'+p.toString():'')+(location.hash||''));
+    }
+
+    // Profile deep link + QR/share.
+    function myProfileLinkV5(){ const username=normalizeUsername(state.profile?.username||state.profile?.usernameLower||''); return username?`${location.origin}${location.pathname}?u=${encodeURIComponent(username)}`:`${location.origin}${location.pathname}`; }
+    window.openProfileShareV5=function(){ ensureSapaV5UI(); const username=normalizeUsername(state.profile?.username||state.profile?.usernameLower||''); if(!username)return alert('Atur username terlebih dahulu agar profil dapat dibagikan.'); const link=myProfileLinkV5(); $('v5-share-username').textContent='@'+username; $('v5-profile-link').textContent=link; const qr=$('v5-profile-qr'); qr.innerHTML=''; if(window.QRCode){ new QRCode(qr,{text:link,width:168,height:168,correctLevel:QRCode.CorrectLevel.M}); } else qr.innerHTML='<span class="text-gray-600 font-black text-sm">QR library belum termuat.<br>Gunakan tombol Salin Link.</span>'; $('modal-v5-profile-share')?.classList.replace('hidden','flex'); };
+    window.closeProfileShareV5=function(){ $('modal-v5-profile-share')?.classList.replace('flex','hidden'); };
+    window.copyProfileLinkV5=async function(){ const link=myProfileLinkV5(); try{await navigator.clipboard.writeText(link);showV4Toast?.('Link profil disalin.');}catch(_){alert(link);} };
+    window.nativeShareProfileV5=async function(){ const link=myProfileLinkV5(); const name=state.profile?.displayName||'Sapa'; if(navigator.share){try{await navigator.share({title:`Profil Sapa ${name}`,text:`Chat saya di Sapa`,url:link});}catch(_){}}else window.copyProfileLinkV5(); };
+    async function processProfileDeepLinkV5(){ if(!state.user||state.v5ProfileLinkProcessed)return; const params=new URLSearchParams(location.search); const username=normalizeUsername(params.get('u')||''); if(!username)return; state.v5ProfileLinkProcessed=true; try{ const snap=await getDocs(query(collection(db,'users'),where('usernameLower','==',username),limit(1))); let found=null; snap.forEach(d=>{found={uid:d.id,...d.data()};}); if(found && found.uid!==state.user.uid){ await window.openUserProfile(found.uid); } else if(found?.uid===state.user.uid){ window.switchTab('profile'); } else alert('Profil Sapa tidak ditemukan.'); }catch(e){console.warn('Profile deep link gagal',e);} finally{params.delete('u'); const qs=params.toString(); history.replaceState(null,'',location.pathname+(qs?'?'+qs:'')+(location.hash||''));} }
+
+    // Receive text/url shared into installed PWA using manifest share_target GET.
+    function captureShareTargetV5(){ try{ const p=new URLSearchParams(location.search); if(!p.get('share_target'))return; const combined=[p.get('title'),p.get('text'),p.get('url')].filter(Boolean).join('\n').slice(0,4000); if(combined)localStorage.setItem(`${SAPA_V5.pendingShareKey}_${state.user?.uid||'guest'}`,combined); ['share_target','title','text','url'].forEach(k=>p.delete(k)); history.replaceState(null,'',location.pathname+(p.toString()?'?'+p.toString():'')+(location.hash||'')); }catch(_){} }
+    function restorePendingShareV5(){ if(!state.user||!state.activeRoomId)return; const key=`${SAPA_V5.pendingShareKey}_${state.user.uid}`; const text=localStorage.getItem(key)||localStorage.getItem(`${SAPA_V5.pendingShareKey}_guest`)||''; if(!text)return; const input=$('message-input'); if(input&&!input.value){input.value=text; localStorage.removeItem(key); localStorage.removeItem(`${SAPA_V5.pendingShareKey}_guest`); window.handleMessageInputChange?.(); showV4Toast?.('Konten yang dibagikan siap dikirim.');} }
+
+    // Keep expired messages out of the visible timeline even without a new snapshot.
+    function expireRenderedMessagesV5(){ const now=Date.now(); state.messageCache?.forEach?.((msg,id)=>{ if(Number(msg?.expiresAtMs||0)>0 && Number(msg.expiresAtMs)<=now){ const el=document.querySelector(`[data-message-id="${CSS.escape(id)}"]`); if(el && !el.dataset.v5Expired){el.dataset.v5Expired='1'; const isMe=msg.senderUid===state.user?.uid; el.innerHTML=(!isMe?`<p class="sender-label">${escapeHTML(msg.senderName||'User')}</p>`:'')+renderMessageContent({...msg,id},isMe);} } }); }
+    clearInterval(state.v5ExpireTimer); state.v5ExpireTimer=setInterval(expireRenderedMessagesV5,30000);
+
+    // Ensure V5 settings/profile UI survives older render hooks.
+    const originalUpdateCurrentUserUIV5=updateCurrentUserUI;
+    updateCurrentUserUI=function(){ originalUpdateCurrentUserUIV5(); ensureSapaV5UI(); setTimeout(processPwaShortcutV5,250); setTimeout(processProfileDeepLinkV5,500); setTimeout(syncMutedChatsToSwV5,650); setTimeout(()=>window.flushOfflineQueueV5(false),900); };
+    const originalSwitchTabV5=window.switchTab;
+    window.switchTab=function(tab){ const r=originalSwitchTabV5(tab); setTimeout(()=>{ensureSapaV5UI(); if(tab==='chats')renderUnifiedChatList?.();},40); return r; };
+
+    captureShareTargetV5();
+    ensureSapaV5UI();
+    updateQueueBadgeV5();
+    if(navigator.onLine) setTimeout(()=>window.flushOfflineQueueV5(false),1200);
+    console.info('Sapa V5.0 Messenger Experience aktif — Firestore-inline media dipertahankan.');
 
   </script>
 </body>
